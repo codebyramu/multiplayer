@@ -691,11 +691,11 @@ const ArcadeController: React.FC<{
       )}
 
       {/* ─── 3. MAIN CONTROLLER INTERACTION REGION ─── */}
-      {/* Portrait: stacked column. Landscape: side-by-side split (joystick left 48%, buttons right 48%) */}
-      <div className="flex-1 flex flex-col landscape:flex-row items-center landscape:items-stretch justify-around landscape:justify-between gap-3 landscape:gap-2 min-h-0 py-1 landscape:py-0">
+      {/* Landscape: side-by-side split (joystick left 50%, buttons right 50%) */}
+      <div className="flex-1 flex flex-row items-stretch justify-between gap-2 min-h-0 py-1 overflow-hidden">
 
-        {/* ═══ 360° ANALOG JOYSTICK — Left side in landscape ═══ */}
-        <div className="flex flex-col items-center justify-center gap-1.5 landscape:w-[48%] landscape:py-2">
+        {/* ═══ 360° ANALOG JOYSTICK — Left half ═══ */}
+        <div className="flex flex-col items-center justify-center gap-1 w-1/2 h-full py-1">
           <div
             ref={joystickRef}
             onPointerDown={onPointerDown}
@@ -705,13 +705,13 @@ const ArcadeController: React.FC<{
             onTouchStart={onTouchStart}
             onTouchMove={onTouchMove}
             onTouchEnd={onTouchEnd}
-            className="relative flex items-center justify-center rounded-full cursor-pointer touch-none shadow-2xl"
+            className="relative flex items-center justify-center rounded-full cursor-pointer touch-none shadow-2xl shrink-0"
             style={{
-              width: 'min(44vw, 180px)',
-              height: 'min(44vw, 180px)',
+              width: 'min(38vw, 24vh, 160px)',
+              height: 'min(38vw, 24vh, 160px)',
               background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(10,10,15,0.85) 100%)',
               border: `2px solid ${stickActive ? '#FFB224' : 'rgba(255,255,255,0.18)'}`,
-              boxShadow: stickActive ? '0 0 30px rgba(255,178,36,0.3) inset, 0 0 20px rgba(255,178,36,0.3)' : 'none',
+              boxShadow: stickActive ? '0 0 25px rgba(255,178,36,0.3) inset, 0 0 15px rgba(255,178,36,0.3)' : 'none',
               transition: 'border-color 0.1s, box-shadow 0.1s',
             }}
           >
@@ -723,23 +723,23 @@ const ArcadeController: React.FC<{
             <motion.div
               animate={{ x: stickPos.x, y: stickPos.y }}
               transition={{ type: 'spring', stiffness: 850, damping: 40 }}
-              className="absolute w-12 h-12 rounded-full pointer-events-none flex items-center justify-center font-bold text-[9px] text-black shadow-2xl"
+              className="absolute w-11 h-11 rounded-full pointer-events-none flex items-center justify-center font-bold text-[9px] text-black shadow-2xl select-none"
               style={{
                 background: 'radial-gradient(circle at 35% 35%, #FFE27A, #FF7700)',
-                boxShadow: '0 4px 20px rgba(255,140,0,0.9), 0 0 10px rgba(255,178,36,0.8)',
+                boxShadow: '0 4px 16px rgba(255,140,0,0.9), 0 0 10px rgba(255,178,36,0.8)',
                 border: '2px solid rgba(255,255,255,0.6)',
               }}
             >
               STEER
             </motion.div>
           </div>
-          <span className="text-[9px] font-mono text-arcade-cream-muted uppercase tracking-widest">
+          <span className="text-[8px] font-mono text-arcade-cream-muted uppercase tracking-widest shrink-0">
             360&deg; Virtual Touch
           </span>
         </div>
 
-        {/* ═══ TACTICAL ACTION BUTTONS — Right side in landscape ═══ */}
-        <div className="flex flex-col items-stretch justify-center gap-2.5 landscape:w-[48%] w-full max-w-[300px] landscape:max-w-none landscape:py-2">
+        {/* ═══ TACTICAL ACTION BUTTONS — Right half ═══ */}
+        <div className="flex flex-col items-stretch justify-center gap-2 w-1/2 h-full py-1 pr-1">
 
           {/* Action 2 Button (Tactical Ability: Freeze Shot / EMP / Shield / Nitro) */}
           {hasAction2 && (
