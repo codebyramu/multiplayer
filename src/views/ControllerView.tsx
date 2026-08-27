@@ -9,6 +9,7 @@ import { Gamepad2, Zap, Shield, Flame, Check, AlertTriangle, Trophy, Crown, Spar
 import { soundManager } from '../audio/SoundManager';
 import { socketClient } from '../multiplayer/SocketClient';
 import { QRScannerModal } from '../components/ui/QRScannerModal';
+import { CuteCharacter } from '../components/ui/CuteCharacter';
 
 interface ControllerViewProps {
   initialCode?: string;
@@ -17,6 +18,7 @@ interface ControllerViewProps {
   inGame: boolean;
   gameId?: GameId;
   hudState?: PlayerClientHUDState | null;
+  allHudStates?: Record<string, PlayerClientHUDState>;
   onJoin: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
   onSendInput: (input: ControllerInput) => void;
   onLeave: () => void;
@@ -205,13 +207,16 @@ const LobbyScreen: React.FC<{
       <GlassPanel className="w-full p-4 flex items-center justify-between border-arcade-mint/30 shadow-glow-mint">
         <div className="flex items-center gap-3">
           <div
-            className="w-12 h-12 rounded-full flex items-center justify-center text-2xl font-bold text-black shadow-lg relative"
-            style={{ backgroundColor: color }}
+            className="p-1 rounded-2xl flex items-center justify-center shadow-lg relative border-2"
+            style={{ backgroundColor: `${color}25`, borderColor: color }}
           >
-            🎮
-            {isOwner && (
-              <span className="absolute -top-2 -right-1 text-xs" title="Party Leader">👑</span>
-            )}
+            <CuteCharacter
+              avatar={player?.avatar || 'cat'}
+              color={color}
+              mood={isReady ? 'ready' : 'idle'}
+              size={44}
+              showCrown={isOwner}
+            />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
@@ -331,10 +336,11 @@ const ArcadeController: React.FC<{
   room?: RoomState | null;
   playerId?: string | null;
   hudState?: PlayerClientHUDState | null;
+  allHudStates?: Record<string, PlayerClientHUDState>;
   playerColor: string;
   playerName: string;
   onSendInput: (input: ControllerInput) => void;
-}> = ({ gameId, room, playerId, hudState, playerColor, playerName, onSendInput }) => {
+}> = ({ gameId, room, playerId, hudState, allHudStates, playerColor, playerName, onSendInput }) => {
   const joystickRef = useRef<HTMLDivElement>(null);
   const pointerIdRef = useRef<number | null>(null);
   const [stickActive, setStickActive] = useState(false);
@@ -533,125 +539,190 @@ const ArcadeController: React.FC<{
     : gameId === 'neon-relay' ? '🚀 NITRO BOOST'
     : '🛡️ KINETIC SHIELD';
 
+  // Automatically select a random alive contender when player is eliminated
+  useEffect(() => {
+    if (isEliminated && contenders.length > 0) {
+      // Find alive contenders first
+      const aliveContenders = contenders.filter((p) => {
+        const h = allHudStates?.[p.id];
+        return !h || h.status !== 'eliminated';
+      });
+      const pool = aliveContenders.length > 0 ? aliveContenders : contenders;
+      const randomIndex = Math.floor(Math.random() * pool.length);
+      const chosen = pool[randomIndex];
+      const targetIndex = contenders.findIndex((c) => c.id === chosen.id);
+      setSpectateIndex(targetIndex !== -1 ? targetIndex : 0);
+    }
+  }, [isEliminated]);
+
   if (isWinner || isEliminated) {
+    const spectatedHud = currentSpectated ? (allHudStates?.[currentSpectated.id] || null) : null;
+    const spectatedRank = spectatedHud?.rank || (spectateIndex + 1);
+    const spectatedScore = spectatedHud?.score ?? currentSpectated?.score ?? 0;
+    const spectatedStatus = spectatedHud?.status || 'alive';
+    const spectatedStatName = spectatedHud?.customStatName || (gameId === 'serpent-arena' ? 'BOOST' : gameId === 'last-platform' ? 'FREEZE' : gameId === 'void-tag' ? 'ROLE' : 'SCORE');
+    const spectatedStatVal = spectatedHud?.customStatValue || (spectatedStatus === 'hunter' ? '⚡ HUNTER' : 'SURVIVOR');
+
     return (
-      <div className="fixed inset-0 z-50 bg-[#0A0A0F] flex flex-col justify-between p-3 sm:p-4 text-center select-none overflow-hidden touch-none">
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 border border-white/10 shrink-0">
-          <div className="flex items-center gap-2">
+      <div className="fixed inset-0 z-50 bg-[#07070C] flex flex-col justify-between p-2.5 sm:p-3 text-center select-none overflow-hidden touch-none">
+        {/* ─── TOP SPECTATOR BAR with Left/Right arrows at corners ─── */}
+        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-2xl bg-white/5 border border-white/10 shrink-0 backdrop-blur-md shadow-xl gap-2">
+          {/* Top-Left Arrow: PREV CONTENDER */}
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={handlePrevSpectate}
+            disabled={contenders.length <= 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-arcade-cyan/30 to-arcade-cyan/15 border border-arcade-cyan/50 text-arcade-cyan hover:brightness-125 font-arcade text-xs font-bold active:scale-95 shadow-glow-cyan shrink-0 disabled:opacity-30"
+          >
+            <ChevronLeft className="w-4 h-4 stroke-[3]" />
+            <span className="hidden xs:inline">PREV</span>
+          </motion.button>
+
+          {/* Center Title Badge */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 justify-center">
             <span className="text-base">{isWinner ? '👑' : '💀'}</span>
-            <span className="font-arcade text-xs text-arcade-cream">{isWinner ? 'CHAMPION' : 'ELIMINATED — SPECTATOR'}</span>
+            <span className="font-arcade text-xs sm:text-sm text-arcade-cream truncate">
+              {isWinner ? 'ARENA CHAMPION' : 'SPECTATING LIVE MATCH'}
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-arcade-amber/20 border border-arcade-amber/40 font-mono text-[10px] text-arcade-amber font-bold shrink-0">
+              {contenders.length > 0 ? `${(spectateIndex % contenders.length) + 1}/${contenders.length}` : '0 ALIVE'}
+            </span>
           </div>
-          <span className="font-mono text-xs text-arcade-amber font-bold">{hudState?.score ?? 0} PTS</span>
+
+          {/* Top-Right Arrow: NEXT CONTENDER */}
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={handleNextSpectate}
+            disabled={contenders.length <= 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-arcade-cyan/15 to-arcade-cyan/30 border border-arcade-cyan/50 text-arcade-cyan hover:brightness-125 font-arcade text-xs font-bold active:scale-95 shadow-glow-cyan shrink-0 disabled:opacity-30"
+          >
+            <span className="hidden xs:inline">NEXT</span>
+            <ChevronRight className="w-4 h-4 stroke-[3]" />
+          </motion.button>
         </div>
 
-        <div className="my-auto max-w-sm mx-auto w-full space-y-3">
-          {!isWinner && (
-            <div className="flex items-center justify-center gap-2 p-1 rounded-2xl bg-black/60 border border-white/15">
-              <button
-                onClick={() => { soundManager.playClick(850); setSpectateMode('arena'); }}
-                className={`flex-1 py-2 px-3 rounded-xl font-arcade text-xs transition-all ${
-                  spectateMode === 'arena'
-                    ? 'bg-arcade-cyan/30 text-arcade-cyan border border-arcade-cyan shadow-glow-cyan font-bold'
-                    : 'text-arcade-cream-muted hover:text-white'
-                }`}
-              >
-                🌐 ARENA OVERVIEW
-              </button>
-              <button
-                onClick={() => { soundManager.playClick(850); setSpectateMode('pilot'); }}
-                className={`flex-1 py-2 px-3 rounded-xl font-arcade text-xs transition-all ${
-                  spectateMode === 'pilot'
-                    ? 'bg-arcade-amber/30 text-arcade-amber border border-arcade-amber shadow-glow-amber font-bold'
-                    : 'text-arcade-cream-muted hover:text-white'
-                }`}
-              >
-                👤 PILOT SPECTATE
-              </button>
-            </div>
-          )}
-
+        {/* ─── MAIN SPECTATOR STAGE & EXACT POV VIEW ─── */}
+        <div className="flex-1 flex flex-col items-center justify-center gap-2.5 my-auto max-w-lg mx-auto w-full px-2">
           {isWinner ? (
-            <div className="p-6 rounded-3xl bg-arcade-amber/20 border-2 border-arcade-amber shadow-glow-amber space-y-2">
+            <div className="p-6 rounded-3xl bg-arcade-amber/20 border-2 border-arcade-amber shadow-glow-amber space-y-2 w-full">
               <div className="text-5xl animate-bounce">👑</div>
               <h3 className="font-arcade text-2xl text-arcade-amber">CHAMPION OF THE ARENA!</h3>
               <p className="font-mono text-xs text-arcade-cream">Congratulations! You conquered the match.</p>
             </div>
-          ) : spectateMode === 'arena' ? (
-            <div className="p-5 rounded-3xl bg-white/5 border border-white/10 space-y-2.5">
-              <div className="text-4xl animate-pulse">📺</div>
-              <h4 className="font-arcade text-sm text-arcade-cream">GLOBAL ARENA BROADCAST</h4>
-              <p className="font-mono text-xs text-arcade-cream-muted">
-                Watching full arena battle stream on main TV screen.
-              </p>
-              <div className="flex items-center justify-center gap-3 text-xs font-mono text-white/70 pt-1">
-                <span>PILOTS: <strong>{contenders.length}</strong></span>
-                <span>GAME: <strong>{(GAMES_DATA[gameId] || GAMES_DATA['serpent-arena']).title.split(' ')[0]}</strong></span>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 rounded-3xl bg-white/5 border border-white/15 space-y-3">
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={handlePrevSpectate}
-                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-xs font-mono text-arcade-cyan flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-4 h-4" /> PREV
-                </button>
-                <span className="font-mono text-xs text-white/50">
-                  {contenders.length > 0 ? `${(spectateIndex % contenders.length) + 1} / ${contenders.length}` : '0 PILOTS'}
-                </span>
-                <button
-                  onClick={handleNextSpectate}
-                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-xs font-mono text-arcade-cyan flex items-center gap-1"
-                >
-                  NEXT <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+          ) : currentSpectated ? (
+            <div className="w-full rounded-3xl bg-gradient-to-b from-white/10 via-white/5 to-black/60 border-2 border-white/15 p-4 shadow-2xl space-y-3 relative overflow-hidden backdrop-blur-xl">
+              {/* Glowing Ambient Halo behind player */}
+              <div
+                className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-28 rounded-full blur-3xl -z-10 opacity-40"
+                style={{ backgroundColor: currentSpectated.color || '#00F5A0' }}
+              />
 
-              {currentSpectated ? (
-                <div className="flex items-center justify-center gap-3 p-3 rounded-2xl bg-black/40 border border-white/10">
+              {/* Pilot Card Header with 2D Cute Character */}
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-3">
                   <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold text-black shadow-lg border-2 border-white/60 shrink-0"
-                    style={{ backgroundColor: currentSpectated.color || '#00F5A0' }}
+                    className="p-1 rounded-2xl border-2 flex items-center justify-center shadow-lg shrink-0"
+                    style={{
+                      backgroundColor: `${currentSpectated.color || '#00F5A0'}25`,
+                      borderColor: currentSpectated.color || '#00F5A0',
+                    }}
                   >
-                    {currentSpectated.isBot ? '🤖' : '👤'}
+                    <CuteCharacter
+                      avatar={currentSpectated.isBot ? 'robot' : (currentSpectated.avatar || 'cat')}
+                      color={currentSpectated.color || '#00F5A0'}
+                      mood={spectatedStatus === 'winner' ? 'winner' : spectatedStatus === 'eliminated' ? 'eliminated' : 'happy'}
+                      size={52}
+                    />
                   </div>
                   <div className="text-left min-w-0">
-                    <span className="font-display text-sm font-bold text-arcade-cream block truncate">
-                      {currentSpectated.name}
-                    </span>
-                    <span className="text-[10px] font-mono text-arcade-amber font-bold block">
-                      SCORE: {currentSpectated.score || 0} PTS
-                    </span>
-                    <span className="text-[9px] font-mono text-white/50 uppercase">
-                      {currentSpectated.isBot ? 'AUTONOMOUS BOT' : 'CONTENDER'}
+                    <div className="flex items-center gap-2">
+                      <span className="font-arcade text-sm sm:text-base font-black text-white block truncate">
+                        {currentSpectated.name}
+                      </span>
+                      {currentSpectated.isBot && (
+                        <span className="px-1.5 py-0.2 rounded bg-white/10 text-white/70 font-mono text-[9px] font-bold uppercase">
+                          AI BOT
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-xs text-arcade-mint font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-arcade-mint animate-pulse" />
+                      LIVE POV STREAMING
                     </span>
                   </div>
                 </div>
-              ) : (
-                <p className="font-mono text-xs text-white/50">No other pilots available to spectate.</p>
+
+                <div className="text-right shrink-0">
+                  <span className="font-arcade text-lg sm:text-xl font-black text-arcade-amber block drop-shadow-[0_0_10px_rgba(255,178,36,0.8)]">
+                    {spectatedScore} PTS
+                  </span>
+                  <span className="font-mono text-xs text-arcade-cyan font-bold block">
+                    RANK #{spectatedRank}
+                  </span>
+                </div>
+              </div>
+
+              {/* ─── LIVE HUD POV METRICS OF SPECTATED PILOT ─── */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
+                  <span className="text-[9px] font-mono text-white/50 block uppercase">PILOT STATUS</span>
+                  <span className={`text-xs font-arcade font-black uppercase ${
+                    spectatedStatus === 'hunter' ? 'text-arcade-crimson animate-pulse' : 'text-arcade-mint'
+                  }`}>
+                    {spectatedStatus === 'hunter' ? '⚡ HUNTER' : spectatedStatus === 'eliminated' ? '💀 DEAD' : '🛡️ SURVIVOR'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
+                  <span className="text-[9px] font-mono text-white/50 block uppercase">{spectatedStatName}</span>
+                  <span className="text-xs font-mono font-bold text-arcade-cream truncate block">
+                    {spectatedStatVal}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
+                  <span className="text-[9px] font-mono text-white/50 block uppercase">GAME MODE</span>
+                  <span className="text-xs font-arcade text-arcade-amber font-bold truncate block">
+                    {(GAMES_DATA[gameId] || GAMES_DATA['serpent-arena']).title.split(' ')[0]}
+                  </span>
+                </div>
+              </div>
+
+              {/* Message from Game Engine */}
+              {spectatedHud?.message && (
+                <div className="py-1 px-2.5 rounded-lg bg-arcade-amber/15 border border-arcade-amber/30 text-arcade-amber font-mono text-[10px] text-center font-bold">
+                  {spectatedHud.message}
+                </div>
               )}
+            </div>
+          ) : (
+            <div className="p-6 rounded-3xl bg-white/5 border border-white/10 space-y-2">
+              <span className="text-4xl">📺</span>
+              <p className="font-mono text-xs text-white/50">Awaiting other contenders...</p>
             </div>
           )}
 
-          <div className="p-2.5 rounded-2xl bg-black/50 border border-white/10">
-            <span className="text-[9px] font-mono text-arcade-cream-muted block mb-1.5">SEND LIVE EMOTE TO TV:</span>
-            <div className="flex items-center justify-center gap-1.5">
+          {/* ─── SEND LIVE REACTION EMOTES TO TV SCREEN ─── */}
+          <div className="w-full p-2.5 rounded-2xl bg-black/50 border border-white/10 backdrop-blur-md">
+            <span className="text-[9px] font-mono text-arcade-cream-muted block mb-1.5 uppercase font-bold tracking-wider">
+              CHEER FOR PILOT &bull; TAP TO SEND LIVE EMOTE TO TV:
+            </span>
+            <div className="flex items-center justify-between gap-1.5">
               {['🔥', '⚡', '💀', '👑', '👏', '🎉'].map((emo) => (
-                <button
+                <motion.button
                   key={emo}
+                  whileTap={{ scale: 0.85 }}
                   onClick={() => sendEmote(emo)}
-                  className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 active:scale-90 text-lg flex items-center justify-center transition-transform shadow-sm"
+                  className="flex-1 h-10 rounded-xl bg-white/10 hover:bg-white/20 active:scale-90 text-xl flex items-center justify-center border border-white/15 transition-transform shadow-md"
                 >
                   {emo}
-                </button>
+                </motion.button>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="font-mono text-[9px] text-arcade-mint animate-pulse shrink-0">
-          👀 SPECTATING MATCH ON TV DISPLAY
+        {/* Bottom TV Broadcast Notice */}
+        <div className="font-mono text-[9px] text-arcade-mint animate-pulse shrink-0 py-0.5">
+          👀 SWITCH PLAYERS WITH ARROWS AT TOP CORNERS &bull; FULL ARENA ACTION ON TV
         </div>
       </div>
     );
@@ -817,7 +888,6 @@ const ArcadeController: React.FC<{
   );
 };
 
-/* ─── MAIN EXPORT ─── */
 export const ControllerView: React.FC<ControllerViewProps> = ({
   initialCode = '',
   room,
@@ -825,11 +895,12 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
   inGame,
   gameId = 'serpent-arena',
   hudState,
+  allHudStates,
   onJoin,
   onSendInput,
   onLeave,
 }) => {
-  // Attempt device orientation lock if available
+  // Request fullscreen & device orientation lock if available
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && 'screen' in window && 'orientation' in window.screen) {
@@ -860,35 +931,19 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
     );
   }
 
-  // 3. In game → show full arcade controller with portrait rotation helper
+  // 3. In game → full-screen fixed landscape arcade controller
   return (
-    <>
-      {/* Forced Landscape Portrait Guide (Appears on portrait mobile screens) */}
-      <div className="md:hidden portrait:flex landscape:hidden fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex-col items-center justify-center p-6 text-center text-white space-y-4">
-        <motion.div
-          animate={{ rotate: [0, -90, -90, 0] }}
-          transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
-          className="text-7xl drop-shadow-[0_0_25px_rgba(255,178,36,0.8)]"
-        >
-          📱
-        </motion.div>
-        <div className="space-y-1.5">
-          <h3 className="font-arcade text-lg text-arcade-amber">ROTATE PHONE TO LANDSCAPE</h3>
-          <p className="font-mono text-xs text-white/70 max-w-xs leading-relaxed">
-            Turn your phone sideways for 360° virtual joystick & tactical action buttons!
-          </p>
-        </div>
-      </div>
-
+    <div className="fixed inset-0 z-50 bg-[#0A0A0F] select-none overflow-hidden touch-none">
       <ArcadeController
         gameId={gameId}
         room={room}
         playerId={playerId}
         hudState={hudState}
+        allHudStates={allHudStates}
         playerColor={playerColor}
         playerName={playerName}
         onSendInput={onSendInput}
       />
-    </>
+    </div>
   );
 };

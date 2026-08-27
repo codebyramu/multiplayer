@@ -449,11 +449,15 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
             const ceilRem = Math.ceil(rem);
             setMatchTime((prev) => (prev !== ceilRem ? ceilRem : prev));
 
-            // 4. Check for Player Eliminations & Broadcast HUD states
+            // 4. Check for Player Eliminations & Broadcast HUD states for ALL players (including bots & rivals)
+            const allHuds: Record<string, PlayerClientHUDState> = {};
             for (const pid in currentRoom.players) {
               const hud = engine.getPlayerHUDState?.(pid);
-              if (hud && onBroadcastHUDStateRef.current) {
-                onBroadcastHUDStateRef.current(hud);
+              if (hud) {
+                allHuds[pid] = hud;
+                if (onBroadcastHUDStateRef.current) {
+                  onBroadcastHUDStateRef.current(hud);
+                }
               }
 
               // Detection for Last Platform / Void Tag eliminations
@@ -469,6 +473,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
                 });
                 soundManager.playElimination();
               }
+            }
+            if (Object.keys(allHuds).length > 0) {
+              socketClient.broadcastGameState({ hud: allHuds });
             }
 
             // Update HUD leaderboard

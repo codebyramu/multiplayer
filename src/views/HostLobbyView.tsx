@@ -13,6 +13,7 @@ import {
   ArrowRight, ArrowLeft, ShieldAlert, Cpu
 } from 'lucide-react';
 import { soundManager } from '../audio/SoundManager';
+import { CuteCharacter } from '../components/ui/CuteCharacter';
 
 interface HostLobbyViewProps {
   room: RoomState;
@@ -392,43 +393,23 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
 
                       {/* ═══ 2. CHARACTER AVATAR BODY & SUIT ═══ */}
                       <div className="relative flex flex-col items-center -mt-2">
-                        {/* Head Avatar */}
-                        <motion.div
-                          animate={
-                            isReady
-                              ? {
-                                  y: [-3, 3, -3],
-                                  boxShadow: [
-                                    '0 0 15px rgba(34,197,94,0.6)',
-                                    '0 0 35px rgba(34,197,94,0.95)',
-                                    '0 0 15px rgba(34,197,94,0.6)',
-                                  ],
-                                }
-                              : { y: 0, boxShadow: '0 0 0px transparent' }
-                          }
-                          transition={{ repeat: Infinity, duration: 1.8 }}
-                          className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl font-bold text-black shadow-2xl relative border-2 border-white/70"
+                        {/* 2D Cute Character Vector Avatar */}
+                        <div
+                          className="relative flex items-center justify-center p-2 rounded-3xl shadow-2xl transition-all"
                           style={{
-                            backgroundColor: p.color || '#00F5A0',
-                            outline: isReady ? '3px solid #22c55e' : '2px solid rgba(255,255,255,0.15)',
-                            outlineOffset: '3px',
+                            backgroundColor: `${p.color || '#00F5A0'}22`,
+                            border: `2px solid ${p.color || '#00F5A0'}`,
+                            boxShadow: isReady ? `0 0 25px ${p.color || '#00F5A0'}88` : 'none',
                           }}
                         >
-                          {emoji}
-
-                          {/* Party Leader Crown */}
-                          {isLeader && (
-                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 text-base drop-shadow-[0_2px_8px_rgba(255,178,36,0.9)] animate-bounce">
-                              👑
-                            </div>
-                          )}
-                        </motion.div>
-
-                        {/* Stylized Jumpsuit Torso */}
-                        <div
-                          className="w-10 h-5 rounded-b-xl -mt-1.5 shadow-lg border-x border-b border-black/50"
-                          style={{ backgroundColor: p.color || '#00F5A0', opacity: 0.95 }}
-                        />
+                          <CuteCharacter
+                            avatar={p.isBot ? 'robot' : (p.avatar || 'cat')}
+                            color={p.color || '#00F5A0'}
+                            mood={isReady ? 'ready' : 'idle'}
+                            size={72}
+                            showCrown={isLeader}
+                          />
+                        </div>
 
                         {/* Stage Ground Shadow */}
                         <div className="w-16 h-3 rounded-full bg-black/70 blur-[3px] mt-1.5" />

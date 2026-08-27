@@ -36,6 +36,7 @@ export const App: React.FC = () => {
   // Player / Controller State (For Mobile Phones)
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [hudState, setHudState] = useState<PlayerClientHUDState | null>(null);
+  const [allHudStates, setAllHudStates] = useState<Record<string, PlayerClientHUDState>>({});
   const [remoteInputs, setRemoteInputs] = useState<Record<string, ControllerInput>>({});
 
   // WebRTC Peer-to-Peer Direct DataChannel Managers
@@ -133,9 +134,12 @@ export const App: React.FC = () => {
     });
 
     const unbindSyncGameState = socketClient.on('sync-game-state', (data: any) => {
-      // Sync lightweight HUD data for controller
-      if (playerId && data?.hud && data.hud[playerId]) {
-        setHudState(data.hud[playerId]);
+      // Sync lightweight HUD data for controller (own HUD or all HUDs for spectator mode)
+      if (data?.hud) {
+        setAllHudStates((prev) => ({ ...prev, ...data.hud }));
+        if (playerId && data.hud[playerId]) {
+          setHudState(data.hud[playerId]);
+        }
       }
     });
 
@@ -450,6 +454,7 @@ export const App: React.FC = () => {
             inGame={matchState === 'playing'}
             gameId={room?.selectedGame || 'serpent-arena'}
             hudState={hudState}
+            allHudStates={allHudStates}
             onJoin={handleJoinParty}
             onSendInput={handleSendInput}
             onLeave={() => {

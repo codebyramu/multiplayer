@@ -1,21 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { PLAYER_AVATARS, SNAKE_SKINS } from '../../data/games';
-import { 
-  Rocket, Ghost, Zap, Crown, Gem, Bot, Sparkles, Flame, Check
-} from 'lucide-react';
+import { Check } from 'lucide-react';
 import { soundManager } from '../../audio/SoundManager';
-
-const ICON_MAP: Record<string, React.ReactNode> = {
-  Rocket: <Rocket className="w-5 h-5" />,
-  Ghost: <Ghost className="w-5 h-5" />,
-  Zap: <Zap className="w-5 h-5" />,
-  Crown: <Crown className="w-5 h-5" />,
-  Gem: <Gem className="w-5 h-5" />,
-  Bot: <Bot className="w-5 h-5" />,
-  Alien: <Sparkles className="w-5 h-5" />,
-  Flame: <Flame className="w-5 h-5" />,
-};
+import { CuteCharacter } from './CuteCharacter';
 
 const COLOR_PALETTE = [
   '#00F5A0', // Mint
@@ -47,10 +35,10 @@ export const AvatarSelector: React.FC<AvatarSelectorProps> = ({
 }) => {
   return (
     <div className="space-y-4">
-      {/* 1. Avatars */}
+      {/* 1. Cute Avatars */}
       <div>
         <label className="block text-xs font-mono text-arcade-cream-muted uppercase mb-2">
-          Select Pilot Emblem
+          Select Pilot Character
         </label>
         <div className="grid grid-cols-4 gap-2">
           {PLAYER_AVATARS.map((av) => {
@@ -65,13 +53,18 @@ export const AvatarSelector: React.FC<AvatarSelectorProps> = ({
                   soundManager.playClick(900);
                   onSelectAvatar(av.id);
                 }}
-                className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all ${
+                className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
                   isSelected
-                    ? 'border-arcade-amber bg-arcade-amber/15 text-arcade-amber shadow-glow-amber'
+                    ? 'border-arcade-amber bg-arcade-amber/20 text-arcade-amber shadow-glow-amber scale-105'
                     : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
                 }`}
               >
-                {ICON_MAP[av.icon] || <Rocket className="w-5 h-5" />}
+                <CuteCharacter 
+                  avatar={av.id} 
+                  color={isSelected ? selectedColor : '#888888'} 
+                  size={36} 
+                  mood={isSelected ? 'happy' : 'idle'}
+                />
                 <span className="text-[10px] font-mono tracking-tight truncate w-full text-center">
                   {av.name.split(' ')[0]}
                 </span>
