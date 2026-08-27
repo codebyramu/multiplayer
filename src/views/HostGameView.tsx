@@ -7,6 +7,7 @@ import { VoidTagEngine } from '../games/void-tag';
 import { RelicRushEngine } from '../games/relic-rush';
 import { LastPlatformEngine } from '../games/last-platform';
 import { SerpentArenaEngine } from '../games/serpent-arena';
+import { ShadowOutrunEngine } from '../games/shadow-outrun';
 import { socketClient } from '../multiplayer/SocketClient';
 import { soundManager } from '../audio/SoundManager';
 import { GlassPanel } from '../components/ui/GlassPanel';
@@ -279,6 +280,45 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
         },
         { roundDuration: room.config.roundDuration || 75 }
       );
+      engineRef.current = engine;
+    } else if (selected === 'shadow-outrun') {
+      const rawMap = (room as any).selectedMap || room.config?.modifiers || 'backrooms';
+      const mapId: any = rawMap === 'cyber-vault' ? 'cyber_vault' : rawMap === 'dungeon' ? 'dungeon' : 'backrooms';
+      const engine = new ShadowOutrunEngine(playersMap, {
+        roundDuration: room.config.roundDuration || 90,
+        mapType: mapId,
+      });
+      engine.onSound = (sound, pitch) => {
+        if (sound === 'pickup') soundManager.playPickup(pitch || 650);
+        else if (sound === 'boost') soundManager.playBoost();
+        else if (sound === 'zap') soundManager.playZap();
+        else if (sound === 'hit') soundManager.playHit();
+        else if (sound === 'elimination') soundManager.playElimination();
+        else if (sound === 'fanfare') soundManager.playVictoryFanfare();
+        else if (sound === 'stinger') soundManager.playHunterStinger();
+      };
+      engine.onEvent = (evt: GameEventPayload) => {
+        if (evt.type === 'eliminate') {
+          const victim = evt.targetPlayerId ? room.players[evt.targetPlayerId]?.name : 'Fugitive';
+          showBannerAnnouncement({
+            type: 'elimination',
+            text: `🚨 ${victim?.toUpperCase()} APPREHENDED!`,
+            subtext: 'CONVERTED TO DEPUTY POLICE',
+            color: '#FF3366',
+            icon: '🚨',
+          });
+          soundManager.playElimination();
+        } else if (evt.type === 'announcement' && evt.payload) {
+          showBannerAnnouncement({
+            type: 'leader',
+            text: evt.payload.title || 'SHADOW OUTRUN',
+            subtext: evt.payload.description || '',
+            color: evt.payload.color || '#FFB224',
+            icon: '🔦',
+          });
+        }
+        if (onGameEvent) onGameEvent(evt);
+      };
       engineRef.current = engine;
     } else {
       // Default: SERPENT ARENA

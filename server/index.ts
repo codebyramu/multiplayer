@@ -271,6 +271,16 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  // 4b. PLAYER / HOST: VOTE MAP
+  socket.on('player-vote-map', (data: { mapId: string; playerId?: string }) => {
+    const code = socketToRoom[socket.id];
+    const playerId = data.playerId || socketToPlayerId[socket.id] || 'host';
+    const room = rooms[code];
+    if (room && data.mapId) {
+      io.to(code).emit('map-voted', { mapId: data.mapId, playerId });
+    }
+  });
+
   // 5. HOST: UPDATE BOTS & SETTINGS
   socket.on('host-update-settings', (data: { botCount?: number; config?: Partial<RoomSession['config']> }) => {
     const code = socketToRoom[socket.id];

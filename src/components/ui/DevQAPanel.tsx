@@ -160,6 +160,10 @@ export const DevQAPanel: React.FC<DevQAPanelProps> = ({
       { id: 'sudden_death', name: '🌋 Sudden Death', icon: '🌋', desc: 'Collapses perimeter tiles & triggers final storm' },
       { id: 'anti_gravity', name: '🦘 Low-G Bounce', icon: '🦘', desc: 'Pops all contenders into anti-gravity jump' },
     ],
+    'shadow-outrun': [
+      { id: 'coin_frenzy', name: '💰 Coin Frenzy', icon: '💰', desc: 'Spawns 25 high-value gold loot coins' },
+      { id: 'blackout', name: '🔦 Blackout Pulse', icon: '🔦', desc: 'Flickers lights & boosts flashlight cone' },
+    ],
   };
 
   const currentEvents = GAME_EVENTS[room.selectedGame] || [];

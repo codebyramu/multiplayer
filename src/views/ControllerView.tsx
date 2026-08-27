@@ -192,7 +192,7 @@ const LobbyScreen: React.FC<{
     onSendInput({ x: 0, y: 0, angle: 0, magnitude: 0, action1: false, action2: false, timestamp: Date.now() });
   };
 
-  const allGameKeys: GameId[] = ['serpent-arena', 'neon-relay', 'void-tag', 'relic-rush', 'last-platform'];
+  const allGameKeys: GameId[] = ['serpent-arena', 'neon-relay', 'void-tag', 'relic-rush', 'last-platform', 'shadow-outrun'];
   const gameMeta = GAMES_DATA[room.selectedGame] || GAMES_DATA['serpent-arena'];
   const playerName = player?.name || 'PILOT';
 
@@ -272,7 +272,7 @@ const LobbyScreen: React.FC<{
 
         {/* Quick Arena Selector Pills for Party Leader */}
         {isOwner && (
-          <div className="grid grid-cols-5 gap-1.5 pt-1">
+          <div className="grid grid-cols-6 gap-1 pt-1">
             {allGameKeys.map((gId) => {
               const isSelected = room.selectedGame === gId;
               const g = GAMES_DATA[gId];
@@ -286,7 +286,7 @@ const LobbyScreen: React.FC<{
                       : 'bg-white/5 border-white/10 text-arcade-cream hover:bg-white/10'
                   }`}
                 >
-                  <span className="text-[9px] font-arcade block truncate">
+                  <span className="text-[8px] font-arcade block truncate">
                     {g.title.split(' ')[0]}
                   </span>
                 </button>
@@ -295,6 +295,67 @@ const LobbyScreen: React.FC<{
           </div>
         )}
       </div>
+
+      {/* Map Voting on Mobile Controller for Shadow Outrun */}
+      {room.selectedGame === 'shadow-outrun' && (
+        <GlassPanel className="w-full p-3.5 space-y-2.5 border-arcade-amber/40 bg-black/70 shadow-glow-amber">
+          <div className="flex items-center justify-between">
+            <span className="font-arcade text-xs text-arcade-amber flex items-center gap-1.5">
+              <span>🗳️ VOTE ARENA MAP</span>
+            </span>
+            <span className="text-[10px] font-mono text-white/60 uppercase">
+              Leading: <strong className="text-arcade-cream">{
+                (room.selectedMap || room.config?.selectedMap) === 'dungeon' ? 'Dungeon' : (room.selectedMap || room.config?.selectedMap) === 'cyber-vault' ? 'Cyber Vault' : 'Backrooms'
+              }</strong>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'backrooms' as const, name: 'Backrooms', icon: '🟡', badge: 'LEVEL 0' },
+              { id: 'dungeon' as const, name: 'Dungeon', icon: '🏰', badge: 'GOTHIC' },
+              { id: 'cyber-vault' as const, name: 'Cyber Vault', icon: '💠', badge: 'VAULT' },
+            ].map((m) => {
+              const voteCount = room.mapVoting?.[m.id] || 0;
+              const isPlayerVoted = room.playerMapVotes?.[playerId] === m.id;
+              const isLeading = (room.selectedMap || room.config?.selectedMap || 'backrooms') === m.id;
+
+              return (
+                <motion.button
+                  key={m.id}
+                  whileTap={{ scale: 0.93 }}
+                  onClick={() => {
+                    triggerHaptic(40);
+                    soundManager.playClick(1050);
+                    socketClient.voteMap(m.id, playerId);
+                  }}
+                  className={`p-2.5 rounded-xl border flex flex-col items-center justify-between text-center transition-all min-h-[90px] ${
+                    isPlayerVoted
+                      ? 'bg-gradient-to-b from-arcade-amber to-amber-600 text-black border-white shadow-glow-amber font-black ring-2 ring-white/50'
+                      : isLeading
+                      ? 'bg-arcade-amber/20 border-arcade-amber text-arcade-cream'
+                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
+                  }`}
+                >
+                  <span className="text-2xl">{m.icon}</span>
+                  <span className="font-arcade text-[10px] font-bold mt-1 block truncate w-full">
+                    {m.name}
+                  </span>
+                  <div className={`mt-1 px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${
+                    isPlayerVoted
+                      ? 'bg-black text-arcade-amber font-black'
+                      : voteCount > 0
+                      ? 'bg-arcade-mint/20 text-arcade-mint border border-arcade-mint/30'
+                      : 'bg-white/10 text-white/50'
+                  }`}>
+                    {voteCount} {voteCount === 1 ? 'VOTE' : 'VOTES'}
+                  </div>
+                </motion.button>
+              );
+            })}
+          </div>
+        </GlassPanel>
+      )}
 
       {/* Giant Main Ready Button */}
       <motion.button
@@ -531,6 +592,7 @@ const ArcadeController: React.FC<{
     : gameId === 'neon-relay' ? '⬆️ JUMP / HOP'
     : gameId === 'void-tag' ? '⚡ PHASE DASH'
     : gameId === 'relic-rush' ? '💥 TACKLE SLAM'
+    : gameId === 'shadow-outrun' ? '⚡ SPRINT DASH'
     : '⬆️ JUMP / HOP';
 
   const hasAction2 = ['void-tag', 'relic-rush', 'last-platform', 'neon-relay'].includes(gameId);
@@ -539,23 +601,106 @@ const ArcadeController: React.FC<{
     : gameId === 'neon-relay' ? '🚀 NITRO BOOST'
     : '🛡️ KINETIC SHIELD';
 
+  // State for initial "ROUND LOST" red screen flash upon death
+  const [showDeathSplash, setShowDeathSplash] = useState(false);
+
   // Automatically select a random alive contender when player is eliminated
   useEffect(() => {
-    if (isEliminated && contenders.length > 0) {
-      // Find alive contenders first
-      const aliveContenders = contenders.filter((p) => {
-        const h = allHudStates?.[p.id];
-        return !h || h.status !== 'eliminated';
-      });
-      const pool = aliveContenders.length > 0 ? aliveContenders : contenders;
-      const randomIndex = Math.floor(Math.random() * pool.length);
-      const chosen = pool[randomIndex];
-      const targetIndex = contenders.findIndex((c) => c.id === chosen.id);
-      setSpectateIndex(targetIndex !== -1 ? targetIndex : 0);
+    if (isEliminated) {
+      setShowDeathSplash(true);
+      triggerHaptic(80);
+      const timer = setTimeout(() => {
+        setShowDeathSplash(false);
+      }, 2400);
+
+      if (contenders.length > 0) {
+        // Find alive contenders first
+        const aliveContenders = contenders.filter((p) => {
+          const h = allHudStates?.[p.id];
+          return !h || h.status !== 'eliminated';
+        });
+        const pool = aliveContenders.length > 0 ? aliveContenders : contenders;
+        const randomIndex = Math.floor(Math.random() * pool.length);
+        const chosen = pool[randomIndex];
+        const targetIndex = contenders.findIndex((c) => c.id === chosen.id);
+        setSpectateIndex(targetIndex !== -1 ? targetIndex : 0);
+      }
+
+      return () => clearTimeout(timer);
     }
   }, [isEliminated]);
 
   if (isWinner || isEliminated) {
+    // Exclusively show ROUND LOST screen on player controller upon losing
+    if (isEliminated && !isWinner) {
+      return (
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="fixed inset-0 z-50 bg-gradient-to-b from-[#32000A] via-[#1A0005] to-[#08080D] flex flex-col items-center justify-between p-6 text-center select-none overflow-hidden touch-none"
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,51,102,0.3)_0%,transparent_70%)] animate-pulse pointer-events-none" />
+
+          {/* Top Status Header */}
+          <div className="w-full flex items-center justify-between px-3.5 py-2 rounded-2xl bg-white/5 border border-white/10 shrink-0 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">💀</span>
+              <span className="font-arcade text-xs text-arcade-crimson font-black tracking-wider">ELIMINATED</span>
+            </div>
+            <span className="font-mono text-xs text-arcade-amber font-bold">{hudState?.score ?? 0} PTS</span>
+          </div>
+
+          {/* Center Elimination Banner */}
+          <div className="my-auto space-y-4 max-w-sm">
+            <motion.div
+              animate={{ scale: [0.9, 1.1, 0.9], rotate: [-4, 4, -4] }}
+              transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+              className="w-28 h-28 mx-auto rounded-3xl bg-arcade-crimson/20 border-2 border-arcade-crimson flex items-center justify-center text-6xl shadow-[0_0_60px_rgba(255,51,102,0.85)]"
+            >
+              💀
+            </motion.div>
+
+            <div className="space-y-1.5">
+              <motion.h1 
+                animate={{ y: [-4, 4, -4] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="font-arcade text-3xl sm:text-5xl font-black text-arcade-crimson tracking-widest drop-shadow-[0_0_30px_rgba(255,51,102,0.9)] uppercase"
+              >
+                ROUND LOST
+              </motion.h1>
+              <p className="font-mono text-sm sm:text-base text-arcade-cream font-bold leading-relaxed">
+                Better luck next time, pilot!
+              </p>
+            </div>
+
+            {/* Emote Cheer to TV Display */}
+            <div className="p-3 rounded-2xl bg-black/60 border border-white/10 backdrop-blur-md space-y-2 mt-4">
+              <span className="text-[10px] font-mono text-white/60 block uppercase font-bold">
+                CHEER &bull; SEND EMOTE TO TV:
+              </span>
+              <div className="flex items-center justify-center gap-2">
+                {['🔥', '⚡', '💀', '👑', '👏', '🎉'].map((emo) => (
+                  <motion.button
+                    key={emo}
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => sendEmote(emo)}
+                    className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 active:scale-90 text-xl flex items-center justify-center border border-white/15 shadow-md"
+                  >
+                    {emo}
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Broadcast Hint */}
+          <div className="font-mono text-[10px] text-white/40 tracking-wider shrink-0 uppercase">
+            📺 MATCH STILL IN PROGRESS &bull; WATCH ACTION ON TV SCREEN
+          </div>
+        </motion.div>
+      );
+    }
+
     const spectatedHud = currentSpectated ? (allHudStates?.[currentSpectated.id] || null) : null;
     const spectatedRank = spectatedHud?.rank || (spectateIndex + 1);
     const spectatedScore = spectatedHud?.score ?? currentSpectated?.score ?? 0;

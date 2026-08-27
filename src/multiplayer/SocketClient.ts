@@ -74,7 +74,7 @@ class SocketClient {
         'room-created', 'player-joined', 'player-left', 'player-disconnected', 'player-ready-updated', 'game-selected',
         'settings-updated', 'countdown-started', 'game-started', 'client-input',
         'sync-game-state', 'game-event', 'emote-reaction', 'game-ended', 'returned-to-lobby',
-        'kicked-from-room', 'host-disconnected',
+        'kicked-from-room', 'host-disconnected', 'map-voted', 'map-voting-updated',
         'webrtc-offer', 'webrtc-answer', 'webrtc-ice-candidate'
       ];
 
@@ -207,6 +207,14 @@ class SocketClient {
   public sendInput(input: ControllerInput) {
     if (this.socket && this.socket.connected) {
       this.socket.volatile.emit('player-input', input);
+    }
+  }
+
+  public voteMap(mapId: string, playerId?: string) {
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('player-vote-map', { mapId, playerId });
+    } else {
+      this.emitLocal('map-voted', { mapId, playerId: playerId || 'host' });
     }
   }
 

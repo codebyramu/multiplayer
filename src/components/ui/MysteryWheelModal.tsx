@@ -19,6 +19,7 @@ const WHEEL_GAMES: GameId[] = [
   'relic-rush',
   'last-platform',
   'serpent-arena',
+  'shadow-outrun',
 ];
 
 const GAME_ICONS: Record<GameId, React.ReactNode> = {
@@ -27,6 +28,7 @@ const GAME_ICONS: Record<GameId, React.ReactNode> = {
   'relic-rush': <Sparkles className="w-5 h-5" />,
   'last-platform': <Layers className="w-5 h-5" />,
   'serpent-arena': <Disc className="w-5 h-5" />,
+  'shadow-outrun': <Radio className="w-5 h-5" />,
 };
 
 export const MysteryWheelModal: React.FC<MysteryWheelModalProps> = ({

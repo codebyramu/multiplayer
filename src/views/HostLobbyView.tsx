@@ -13,6 +13,7 @@ import {
   ArrowRight, ArrowLeft, ShieldAlert, Cpu
 } from 'lucide-react';
 import { soundManager } from '../audio/SoundManager';
+import { socketClient } from '../multiplayer/SocketClient';
 import { CuteCharacter } from '../components/ui/CuteCharacter';
 
 interface HostLobbyViewProps {
@@ -127,7 +128,37 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
     ? `${window.location.protocol}//${room.localIp || window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}/?join=${room.code}`
     : `http://localhost:5173/?join=${room.code}`;
 
-  const allGameKeys: GameId[] = ['serpent-arena', 'neon-relay', 'void-tag', 'relic-rush', 'last-platform'];
+  const SHADOW_MAP_LIST: Array<{
+    id: 'backrooms' | 'dungeon' | 'cyber-vault';
+    name: string;
+    badge: string;
+    icon: string;
+    description: string;
+  }> = [
+    {
+      id: 'backrooms',
+      name: 'Backrooms Labyrinth',
+      badge: '🟡 LEVEL 0',
+      icon: '🟡',
+      description: 'Eerie yellow wallpaper corridors, humming fluorescents & tight maze corners.',
+    },
+    {
+      id: 'dungeon',
+      name: 'Dungeon Catacombs',
+      badge: '🏰 GOTHIC RUINS',
+      icon: '🏰',
+      description: 'Ancient stone catacombs, iron portcullises & rich relic vaults.',
+    },
+    {
+      id: 'cyber-vault',
+      name: 'Cyber Vault',
+      badge: '💠 HIGH-TECH',
+      icon: '💠',
+      description: 'Laser barrier grid, glowing server racks & high-speed corridors.',
+    },
+  ];
+
+  const allGameKeys: GameId[] = ['serpent-arena', 'neon-relay', 'void-tag', 'relic-rush', 'last-platform', 'shadow-outrun'];
 
   const cycleGame = (direction: 1 | -1) => {
     const currentIndex = allGameKeys.indexOf(room.selectedGame);
@@ -208,6 +239,15 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
       accentColor: '#00E5FF',
       glowHex: 'rgba(0,229,255,0.25)',
       floorPattern: 'radial-gradient(circle at 50% 90%, rgba(0,229,255,0.2) 0%, transparent 65%)',
+    },
+    'shadow-outrun': {
+      name: 'SHADOW OUTRUN HEIST',
+      subtitle: 'BACKROOMS & DUNGEON FLASHLIGHT PURSUIT',
+      icon: '🔦',
+      bgGradient: 'radial-gradient(ellipse at 50% 30%, rgba(40,25,0,0.95) 0%, rgba(20,10,0,1) 70%, rgba(8,4,0,1) 100%)',
+      accentColor: '#FFB224',
+      glowHex: 'rgba(255,178,36,0.28)',
+      floorPattern: 'radial-gradient(circle at 50% 90%, rgba(255,178,36,0.25) 0%, transparent 65%)',
     },
   };
 
@@ -574,7 +614,7 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-arcade text-sm text-arcade-cream">SELECT GAME ARENA</span>
                 <span className="px-2 py-0.5 rounded-full bg-arcade-amber/20 border border-arcade-amber/40 text-[10px] font-mono text-arcade-amber">
-                  {allGameKeys.indexOf(room.selectedGame) + 1} OF 5
+                  {allGameKeys.indexOf(room.selectedGame) + 1} OF {allGameKeys.length}
                 </span>
               </div>
 
@@ -594,7 +634,7 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
               {allGameKeys.map((gId) => {
                 const g = GAMES_DATA[gId];
                 const isSelected = room.selectedGame === gId;
@@ -650,6 +690,99 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
               })}
             </div>
           </div>
+
+          {/* Interactive Map Voting Section for Shadow Outrun */}
+          {room.selectedGame === 'shadow-outrun' && (
+            <GlassPanel variant="glow-amber" className="p-4 sm:p-5 border-2 border-arcade-amber/50 bg-black/75 space-y-4 shadow-[0_0_35px_rgba(255,178,36,0.25)]">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-arcade-amber/20 border border-arcade-amber/50 text-arcade-amber flex items-center justify-center font-arcade text-lg shadow-glow-amber">
+                    🗳️
+                  </div>
+                  <div>
+                    <h3 className="font-arcade text-sm sm:text-base text-arcade-cream flex items-center gap-2">
+                      <span>LIVE MAP VOTE</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-arcade-amber/25 text-arcade-amber border border-arcade-amber/40 uppercase font-bold">
+                        3 ARENA MAPS
+                      </span>
+                    </h3>
+                    <p className="text-[11px] font-mono text-white/60">
+                      Players on mobile & host vote in real-time. Winning map launches when match starts!
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-center px-3 py-1.5 rounded-2xl bg-black/60 border border-arcade-amber/40">
+                  <span className="text-[10px] font-mono text-arcade-cream-muted uppercase font-bold">LEADING MAP:</span>
+                  <span className="font-arcade text-xs text-arcade-amber font-black tracking-wide">
+                    {(SHADOW_MAP_LIST.find((m) => m.id === (room.selectedMap || room.config?.selectedMap || 'backrooms')) || SHADOW_MAP_LIST[0]).name}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {SHADOW_MAP_LIST.map((m) => {
+                  const voteCount = room.mapVoting?.[m.id] || 0;
+                  const currentSelected = room.selectedMap || room.config?.selectedMap || 'backrooms';
+                  const isWinning = currentSelected === m.id;
+                  const isHostVoted = room.playerMapVotes?.['host'] === m.id;
+
+                  return (
+                    <motion.div
+                      key={m.id}
+                      whileHover={{ scale: 1.02 }}
+                      className={`relative rounded-2xl p-4 border-2 transition-all flex flex-col justify-between space-y-3 ${
+                        isWinning
+                          ? 'border-arcade-amber bg-gradient-to-b from-arcade-amber/25 via-black/80 to-black shadow-[0_0_30px_rgba(255,178,36,0.45)] ring-1 ring-arcade-amber/40'
+                          : 'border-white/15 bg-black/60 hover:border-white/30'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-3xl">{m.icon}</span>
+                          <div>
+                            <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-white/10 text-arcade-amber border border-white/10 block w-fit">
+                              {m.badge}
+                            </span>
+                            <h4 className="font-arcade text-xs sm:text-sm text-arcade-cream font-bold mt-1">{m.name}</h4>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end">
+                          <div className={`px-2.5 py-1 rounded-xl font-arcade text-xs font-black flex items-center gap-1.5 ${
+                            voteCount > 0
+                              ? 'bg-arcade-mint text-black shadow-glow-mint'
+                              : 'bg-white/10 text-white/50 border border-white/10'
+                          }`}>
+                            <span>{voteCount}</span>
+                            <span className="text-[9px]">{voteCount === 1 ? 'VOTE' : 'VOTES'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] font-mono text-white/70 leading-relaxed min-h-[36px]">
+                        {m.description}
+                      </p>
+
+                      <button
+                        onClick={() => {
+                          soundManager.playClick(1100);
+                          socketClient.voteMap(m.id, 'host');
+                        }}
+                        className={`w-full py-2.5 px-3 rounded-xl font-arcade text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                          isHostVoted
+                            ? 'bg-gradient-to-r from-arcade-amber to-amber-500 text-black shadow-glow-amber border border-white/40'
+                            : 'bg-white/10 hover:bg-white/20 text-arcade-cream border border-white/20'
+                        }`}
+                      >
+                        <span>{isHostVoted ? '✓ CAST AS HOST' : 'VOTE THIS MAP'}</span>
+                      </button>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </GlassPanel>
+          )}
 
           {/* Bot Count + Bot Difficulty Controls */}
           <GlassPanel className="p-5 space-y-4 border-white/10">

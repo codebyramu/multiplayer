@@ -92,6 +92,24 @@ export const GAMES_DATA: Record<string, GameMetadata> = {
     badge: 'FLAGSHIP',
     isFlagship: true,
   },
+  'shadow-outrun': {
+    id: 'shadow-outrun',
+    title: 'SHADOW OUTRUN',
+    subtitle: 'CHORE POLICE & FLASHLIGHT HEIST',
+    tagline: 'Evade the Catcher Beam & Heist Coins',
+    category: 'SURVIVAL / TAG',
+    accentColor: 'text-arcade-amber',
+    accentHex: '#FFB224',
+    glowColor: 'rgba(255, 178, 36, 0.4)',
+    coverImage: '/images/relic-rush.jpg',
+    description: 'One player is chosen as the Catcher with a tactical flashlight torch! Thieves explore eerie Backrooms, Dungeons, and Vaults to loot coins. When the flashlight beam strikes a thief, their speed drops by 35%!',
+    playersLabel: '2 - 8 PLAYERS',
+    durationLabel: '90 SECONDS',
+    difficulty: 'HARD',
+    controlsDescription: 'Steer with 360° joystick. Catcher aims flashlight cone. Thieves sprint to break line of sight, loot gold coins, and evade capture!',
+    icon: 'Radio',
+    badge: 'NEW 3-MAP MODE',
+  },
 };
 
 export const SNAKE_SKINS = [

@@ -3,7 +3,8 @@ export type GameId =
   | 'void-tag' 
   | 'relic-rush' 
   | 'last-platform' 
-  | 'serpent-arena';
+  | 'serpent-arena'
+  | 'shadow-outrun';
 
 export interface GameMetadata {
   id: GameId;
@@ -101,6 +102,8 @@ export type BotDifficulty = 'easy' | 'medium' | 'hard';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type GameDifficulty = 'easy' | 'medium' | 'normal' | 'hard' | 'extreme';
 
+export type ShadowOutrunMapId = 'backrooms' | 'dungeon' | 'cyber-vault';
+
 export interface RoomState {
   code: string;
   hostSocketId: string;
@@ -113,7 +116,11 @@ export interface RoomState {
     difficulty: 'easy' | 'medium' | 'normal' | 'hard' | 'extreme';
     powerupsEnabled: boolean;
     modifiers?: GameModifiers;
+    selectedMap?: ShadowOutrunMapId;
   };
+  mapVoting?: { [mapId: string]: number };
+  playerMapVotes?: Record<string, string>; // playerId -> mapId
+  selectedMap?: ShadowOutrunMapId;
   tournament?: TournamentState;
   playlistMode?: TournamentMode;
   playlistSequence?: GameId[];
@@ -370,3 +377,47 @@ export interface SerpentArenaState {
   }>;
   leaderboard: Array<{ id: string; name: string; length: number; score: number; color: string }>;
 }
+
+// 6. SHADOW OUTRUN
+export interface ShadowOutrunCoin {
+  id: string;
+  x: number;
+  y: number;
+  value: number;
+  radius: number;
+  isSpecial?: boolean;
+}
+
+export interface ShadowOutrunWall {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ShadowOutrunState {
+  mapId: ShadowOutrunMapId;
+  catcherId: string;
+  coins: ShadowOutrunCoin[];
+  walls: ShadowOutrunWall[];
+  players: Record<string, {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    angle: number;
+    isCatcher: boolean;
+    isIlluminated: boolean;
+    stamina: number;
+    isSprinting: boolean;
+    coinsCollected: number;
+    isEliminated: boolean;
+    score: number;
+  }>;
+  flashlight: {
+    angle: number;
+    coneAngle: number;
+    range: number;
+  };
+}
+

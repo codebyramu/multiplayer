@@ -1432,49 +1432,52 @@ export class SerpentArenaEngine {
         this.camera.targetZoom = Math.max(minArenaZoom, Math.min(maxZoom, calculatedZoom));
       } else {
         // MULTIPLE LIVING SNAKES:
-        // Calculate target center strictly from HEAD positions + forward lookahead,
-        // weighted heavily toward human player heads
+        // Calculate group center and encompass the furthest snake head with ample boundary margin
         let minX = Infinity;
         let maxX = -Infinity;
         let minY = Infinity;
         let maxY = -Infinity;
-        let sumWeightedX = 0;
-        let sumWeightedY = 0;
-        let totalWeight = 0;
+        let sumX = 0;
+        let sumY = 0;
 
         for (const snake of livingSnakes) {
-          const lookaheadDist = Math.min(100, snake.speed * 0.35);
+          const lookaheadDist = Math.min(140, snake.speed * 0.45);
           const headX = snake.x;
           const headY = snake.y;
           const lookX = headX + Math.cos(snake.angle) * lookaheadDist;
           const lookY = headY + Math.sin(snake.angle) * lookaheadDist;
 
-          // Human player heads are weighted heavily (4.5x) vs bot heads (1.0x)
-          const weight = snake.isBot ? 1.0 : 4.5;
-          sumWeightedX += (headX * 0.5 + lookX * 0.5) * weight;
-          sumWeightedY += (headY * 0.5 + lookY * 0.5) * weight;
-          totalWeight += weight;
+          sumX += (headX + lookX) * 0.5;
+          sumY += (headY + lookY) * 0.5;
 
-          // Bounding box enclosing all living snake heads & lookahead points
           minX = Math.min(minX, headX, lookX);
           maxX = Math.max(maxX, headX, lookX);
           minY = Math.min(minY, headY, lookY);
           maxY = Math.max(maxY, headY, lookY);
         }
 
-        const safeWeight = totalWeight > 0 ? totalWeight : 1;
-        const weightedCentroidX = sumWeightedX / safeWeight;
-        const weightedCentroidY = sumWeightedY / safeWeight;
-        const bboxCenterX = (minX + maxX) / 2;
-        const bboxCenterY = (minY + maxY) / 2;
+        const midX = sumX / livingSnakes.length;
+        const midY = sumY / livingSnakes.length;
 
-        // Target center combines weighted human-biased centroid (70%) and bounding box center (30%)
-        this.camera.targetX = weightedCentroidX * 0.70 + bboxCenterX * 0.30;
-        this.camera.targetY = weightedCentroidY * 0.70 + bboxCenterY * 0.30;
+        // Find the maximum distance from the group midpoint to any snake's head/lookahead
+        let maxDistFromMid = 0;
+        for (const snake of livingSnakes) {
+          const lookaheadDist = Math.min(140, snake.speed * 0.45);
+          const lookX = snake.x + Math.cos(snake.angle) * lookaheadDist;
+          const lookY = snake.y + Math.sin(snake.angle) * lookaheadDist;
+          const d1 = Math.hypot(snake.x - midX, snake.y - midY);
+          const d2 = Math.hypot(lookX - midX, lookY - midY);
+          maxDistFromMid = Math.max(maxDistFromMid, d1, d2);
+        }
 
-        // Dynamic zoom: must enclose all living snake heads with a minimum 280px margin buffer on all sides
-        const spanX = Math.max(100, (maxX - minX) + 280 * 2);
-        const spanY = Math.max(100, (maxY - minY) + 280 * 2);
+        // Camera center is the dynamic midpoint
+        this.camera.targetX = midX;
+        this.camera.targetY = midY;
+
+        // View diameter = (max distance from mid * 2) + generous margin (520px buffer) so heads NEVER leave screen
+        const requiredSpan = Math.max(300, (maxDistFromMid * 2) + 520);
+        const spanX = Math.max(requiredSpan, (maxX - minX) + 520);
+        const spanY = Math.max(requiredSpan, (maxY - minY) + 520);
 
         const zoomX = validWidth / spanX;
         const zoomY = validHeight / spanY;

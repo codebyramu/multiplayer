@@ -527,8 +527,8 @@ export class NeonRelayEngine {
     }
 
     // 1. Centroid of all active racers
-    const centroidX = sumX / targetGroup.length;
-    const centroidY = sumY / targetGroup.length;
+    const midX = sumX / targetGroup.length;
+    const midY = sumY / targetGroup.length;
     const avgVx = sumVx / targetGroup.length;
     const avgVy = sumVy / targetGroup.length;
 
@@ -537,23 +537,27 @@ export class NeonRelayEngine {
     const lookaheadX = avgVx * lookaheadTime;
     const lookaheadY = avgVy * lookaheadTime;
 
-    const bboxCenterX = (minX + maxX) / 2;
-    const bboxCenterY = (minY + maxY) / 2;
+    const targetCenterX = midX + lookaheadX * 0.6;
+    const targetCenterY = midY + lookaheadY * 0.6;
 
-    const targetCenterX = (centroidX + lookaheadX) * 0.70 + bboxCenterX * 0.30;
-    const targetCenterY = (centroidY + lookaheadY) * 0.70 + bboxCenterY * 0.30;
+    // 3. Find max distance from group center to any racer
+    let maxDistFromMid = 0;
+    for (const r of targetGroup) {
+      const d = Math.hypot(r.x - midX, r.y - midY);
+      maxDistFromMid = Math.max(maxDistFromMid, d);
+    }
 
-    // 3. Bounding box of all racers + 250px margin buffer
-    const spanX = (maxX - minX) + 250 * 2;
-    const spanY = (maxY - minY) + 250 * 2;
+    // 4. Bounding box with 380px margin buffer
+    const spanX = Math.max((maxDistFromMid * 2) + 380, (maxX - minX) + 380);
+    const spanY = Math.max((maxDistFromMid * 2) + 380, (maxY - minY) + 380);
 
-    // 4. Dynamic zoom clamped smoothly between 0.45x and 1.0x
+    // 5. Dynamic zoom clamped smoothly between 0.38x and 1.0x
     const zoomX = 1600 / Math.max(spanX, 600);
     const zoomY = 950 / Math.max(spanY, 450);
     const calculatedZoom = Math.min(zoomX, zoomY);
-    const targetZoom = Math.max(0.45, Math.min(1.0, calculatedZoom));
+    const targetZoom = Math.max(0.38, Math.min(1.0, calculatedZoom));
 
-    // 5. Smooth Damped Interpolation
+    // 6. Smooth Damped Interpolation
     this.camera.targetX = targetCenterX;
     this.camera.targetY = targetCenterY;
     this.camera.targetZoom = targetZoom;

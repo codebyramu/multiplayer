@@ -16,8 +16,18 @@ import { HostGameView } from './views/HostGameView';
 import { ControllerView } from './views/ControllerView';
 import { LeaderboardsView } from './views/LeaderboardsView';
 import { ProfileView } from './views/ProfileView';
+import { LandingIntroAd } from './components/ui/LandingIntroAd';
 
 export const App: React.FC = () => {
+  // Landing Intro State
+  const [showLandingIntro, setShowLandingIntro] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('hypercade_visited');
+    } catch {
+      return true;
+    }
+  });
+
   // Navigation
   const [currentTab, setCurrentTab] = useState<'hub' | 'host' | 'join' | 'leaderboards' | 'profile'>('hub');
   const [urlJoinCode, setUrlJoinCode] = useState<string>('');
@@ -154,6 +164,36 @@ export const App: React.FC = () => {
       setMatchState('lobby');
     });
 
+    const unbindMapVoted = socketClient.on('map-voted', (data: { mapId: string; playerId: string }) => {
+      setRoom((prev) => {
+        if (!prev) return prev;
+        const playerVotes = { ...(prev.playerMapVotes || {}), [data.playerId]: data.mapId };
+        const counts: Record<string, number> = { backrooms: 0, dungeon: 0, 'cyber-vault': 0 };
+        for (const pid in playerVotes) {
+          const mid = playerVotes[pid];
+          counts[mid] = (counts[mid] || 0) + 1;
+        }
+        let winningMap: any = 'backrooms';
+        let maxVotes = -1;
+        for (const mid of ['backrooms', 'dungeon', 'cyber-vault']) {
+          if ((counts[mid] || 0) > maxVotes) {
+            maxVotes = counts[mid] || 0;
+            winningMap = mid;
+          }
+        }
+        return {
+          ...prev,
+          playerMapVotes: playerVotes,
+          mapVoting: counts,
+          selectedMap: winningMap,
+          config: {
+            ...prev.config,
+            selectedMap: winningMap,
+          },
+        };
+      });
+    });
+
     return () => {
       unbindRoomCreated();
       unbindPlayerJoined();
@@ -166,6 +206,7 @@ export const App: React.FC = () => {
       unbindSyncGameState();
       unbindGameEnded();
       unbindReturnedLobby();
+      unbindMapVoted();
     };
   }, [playerId]);
 
@@ -390,6 +431,16 @@ export const App: React.FC = () => {
       {/* Subtle CRT Overlay Scanlines */}
       <CRTOverlay />
 
+      {/* 0. SUPER CINEMATIC PRODUCT INTRO AD & 3-SEC VOICEOVER */}
+      {showLandingIntro && (
+        <LandingIntroAd
+          onEnter={() => {
+            try { sessionStorage.setItem('hypercade_visited', 'true'); } catch {}
+            setShowLandingIntro(false);
+          }}
+        />
+      )}
+
       {/* Top Navbar */}
       <Navbar
         currentTab={currentTab}
@@ -411,6 +462,7 @@ export const App: React.FC = () => {
             onHostGame={handleHostCreateParty}
             onJoinParty={() => setCurrentTab('join')}
             onViewLeaderboards={() => setCurrentTab('leaderboards')}
+            onReplayIntro={() => setShowLandingIntro(true)}
           />
         )}
 
