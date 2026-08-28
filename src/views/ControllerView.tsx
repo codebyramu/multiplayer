@@ -7,10 +7,12 @@ import {
   Sparkles,
   Shuffle,
   AlertTriangle,
-  Check,
   Zap,
   Gamepad2,
   Tv,
+  Radio,
+  Sliders,
+  Check,
 } from 'lucide-react';
 import { RoomState, ControllerInput, GameId, PlayerClientHUDState } from '../types';
 import { GAMES_DATA, PLAYER_AVATARS } from '../data/games';
@@ -88,13 +90,13 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
     );
   }
 
-  return <ThemedJoinScreen initialCode={initialCode} onJoinParty={joinHandler} />;
+  return <CyberPhoneJoinScreen initialCode={initialCode} onJoinParty={joinHandler} />;
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   1. CYBERPUNK GLASSMORPHIC JOIN SCREEN WITH AVATAR GALLERY DROPDOWN
+   1. CYBERPUNK VINTAGE PHONE CONTROLLER WITH CHROMATIC GLITCH & DUST
    ═══════════════════════════════════════════════════════════════ */
-const ThemedJoinScreen: React.FC<{
+const CyberPhoneJoinScreen: React.FC<{
   initialCode?: string;
   onJoinParty: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
 }> = ({ initialCode, onJoinParty }) => {
@@ -107,6 +109,7 @@ const ThemedJoinScreen: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
 
+  // Auto-fill party code from URL query ?join=CODE
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -131,7 +134,7 @@ const ThemedJoinScreen: React.FC<{
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) {
-      setError('Please enter party code on TV');
+      setError('ENTER PARTY CODE ON TV');
       return;
     }
     setError(null);
@@ -147,31 +150,58 @@ const ThemedJoinScreen: React.FC<{
     });
 
     setIsJoining(false);
-    if (!res.success) setError(res.error || 'Could not connect to host.');
+    if (!res.success) setError(res.error || 'COULD NOT CONNECT TO HOST.');
   };
 
   return (
-    <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none relative z-10 font-display">
-      {/* Background Neon Ambient Glows matching Website Theme */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,245,160,0.12)_0%,rgba(157,78,221,0.08)_40%,transparent_70%)] pointer-events-none" />
+    <div className="relative min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none overflow-hidden font-display">
+      {/* ─── A. VINTAGE RETRO GRID & SCANLINE OVERLAYS ─── */}
+      <div className="absolute inset-0 bg-[#06070D] pointer-events-none" />
+      <div
+        className="absolute inset-0 bg-[linear-gradient(to_right,#00F5A008_1px,transparent_1px),linear-gradient(to_bottom,#00F5A008_1px,transparent_1px)] bg-[size:28px_28px] pointer-events-none opacity-60"
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,245,160,0.15)_0%,rgba(157,78,221,0.12)_45%,transparent_75%)] pointer-events-none" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.4)_50%)] bg-[size:100%_4px] pointer-events-none opacity-40 z-10" />
 
+      {/* ─── B. CYBER DECK TERMINAL CHASSIS ─── */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={{ opacity: 0, scale: 0.94, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="w-full max-w-md rounded-3xl bg-[#090A14]/85 border-2 border-white/15 backdrop-blur-2xl p-6 sm:p-8 shadow-[0_0_80px_rgba(0,245,160,0.18)] space-y-6 relative overflow-hidden"
+        className="relative z-20 w-full max-w-md rounded-3xl bg-black/85 border-2 border-white/20 backdrop-blur-3xl p-6 sm:p-8 shadow-[0_0_80px_rgba(0,245,160,0.25)] space-y-6 overflow-hidden"
       >
-        {/* Header Branding */}
-        <div className="text-center space-y-1.5 border-b border-white/10 pb-4">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-arcade-mint/15 border border-arcade-mint/40 text-2xl shadow-glow-mint mx-auto">
-            👑
+        {/* Glowing Top Cyber Bevel Strip */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-arcade-amber via-arcade-mint to-arcade-cyan" />
+
+        {/* Vintage Header with Chromatic Glitch Badge */}
+        <div className="text-center space-y-2 border-b border-white/10 pb-4">
+          <div className="flex items-center justify-between text-[10px] font-mono text-white/50 px-1">
+            <span className="flex items-center gap-1.5 text-arcade-mint">
+              <Radio className="w-3 h-3 animate-pulse" /> P2P DATALINK
+            </span>
+            <span className="text-arcade-amber font-bold">HYP-DECK v2.4</span>
           </div>
-          <h2 className="font-arcade text-xl sm:text-2xl font-black tracking-wider text-white">
-            JOIN ARCADE PARTY
-          </h2>
-          <p className="font-mono text-[11px] text-arcade-mint uppercase tracking-widest font-bold">
-            WIRELESS CONTROLLER PAIRING
-          </p>
+
+          <div className="space-y-1">
+            <h2 className="font-arcade text-2xl sm:text-3xl font-black text-white tracking-widest leading-none drop-shadow-[0_0_20px_rgba(0,245,160,0.7)]">
+              <motion.span
+                animate={{
+                  textShadow: [
+                    '0 0 15px rgba(255,255,255,0.7)',
+                    '0 0 25px rgba(0,245,160,0.9), 2px 2px #FF0055',
+                    '0 0 25px rgba(0,229,255,0.9), -2px -2px #00F5A0',
+                    '0 0 15px rgba(255,255,255,0.7)',
+                  ],
+                }}
+                transition={{ repeat: Infinity, duration: 3.0, ease: 'easeInOut' }}
+              >
+                PHONE GAMEPAD
+              </motion.span>
+            </h2>
+            <p className="font-mono text-[10px] sm:text-[11px] text-white/60 uppercase tracking-widest">
+              PAIR WITH LIVING ROOM TV SCREEN
+            </p>
+          </div>
         </div>
 
         {/* Error Notification */}
@@ -179,7 +209,7 @@ const ThemedJoinScreen: React.FC<{
           <motion.div
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-3 rounded-2xl bg-red-500/15 border border-red-500/40 text-red-400 text-xs font-mono flex items-center gap-2"
+            className="p-3 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400 text-xs font-mono flex items-center gap-2"
           >
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span className="truncate">{error}</span>
@@ -187,11 +217,14 @@ const ThemedJoinScreen: React.FC<{
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* 1. Party Code with Camera Scanner Action */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
-              PARTY CODE (DISPLAYED ON TV)
-            </label>
+          {/* 1. Party Code with Camera QR Trigger */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-mono font-bold text-white/60">
+              <span>1. PARTY CODE (ON TV)</span>
+              <span className="text-arcade-cyan flex items-center gap-1">
+                <Camera className="w-3 h-3" /> SCAN QR
+              </span>
+            </div>
             <div className="relative">
               <input
                 type="text"
@@ -200,7 +233,7 @@ const ThemedJoinScreen: React.FC<{
                 placeholder="e.g. HYP42"
                 maxLength={7}
                 required
-                className="w-full pl-4 pr-12 py-3.5 rounded-2xl bg-black/60 border-2 border-white/15 text-center font-arcade text-2xl tracking-widest text-arcade-amber placeholder:text-white/20 uppercase focus:outline-none focus:border-arcade-amber shadow-inner"
+                className="w-full pl-4 pr-14 py-3.5 rounded-2xl bg-white/5 border-2 border-white/20 text-center font-arcade text-2xl tracking-widest text-arcade-amber placeholder:text-white/20 uppercase focus:outline-none focus:border-arcade-amber shadow-[inset_0_0_20px_rgba(0,0,0,0.8)]"
               />
               <button
                 type="button"
@@ -209,7 +242,7 @@ const ThemedJoinScreen: React.FC<{
                   setShowScanner(true);
                 }}
                 title="Scan QR Code on TV"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-arcade-cyan/20 hover:bg-arcade-cyan/30 text-arcade-cyan border border-arcade-cyan/50 active:scale-95 transition-all shadow-glow-cyan"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-arcade-cyan/25 hover:bg-arcade-cyan/35 text-arcade-cyan border border-arcade-cyan/50 active:scale-95 transition-all shadow-glow-cyan"
               >
                 <Camera className="w-4 h-4" />
               </button>
@@ -217,9 +250,9 @@ const ThemedJoinScreen: React.FC<{
           </div>
 
           {/* 2. Pilot Name */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
-              PILOT HANDLE
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-mono font-bold text-white/60">
+              2. PILOT CALLSIGN
             </label>
             <input
               type="text"
@@ -227,44 +260,42 @@ const ThemedJoinScreen: React.FC<{
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. CyberViper"
               maxLength={14}
-              className="w-full px-4 py-3 rounded-2xl bg-black/50 border-2 border-white/15 text-center font-display text-sm tracking-wide text-white placeholder:text-white/30 focus:outline-none focus:border-arcade-mint"
+              className="w-full px-4 py-3 rounded-2xl bg-white/5 border-2 border-white/15 text-center font-display text-sm tracking-wide text-white placeholder:text-white/30 focus:outline-none focus:border-arcade-mint shadow-inner"
             />
           </div>
 
-          {/* 3. Interactive Avatar & Color Customization Trigger Button */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
-                PILOT AVATAR & AURA COLOR
-              </label>
+          {/* 3. Avatar & Aura Color Customizer with Expandable Gallery */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-mono font-bold text-white/60">
+              <span>3. PILOT AVATAR & AURA</span>
               <button
                 type="button"
                 onClick={handleRandomize}
-                className="text-[10px] font-mono text-arcade-amber hover:underline flex items-center gap-1"
+                className="text-arcade-amber hover:underline flex items-center gap-1 font-bold"
               >
                 <Shuffle className="w-3 h-3" />
                 <span>RANDOMIZE</span>
               </button>
             </div>
 
-            {/* Selected Avatar Pill (Clicking opens the interactive gallery dropdown) */}
+            {/* Selected Avatar Pill (Tapping expands gallery) */}
             <button
               type="button"
               onClick={() => {
                 soundManager.playClick(900);
                 setIsGalleryOpen(!isGalleryOpen);
               }}
-              className="w-full p-2.5 rounded-2xl bg-black/60 border-2 border-white/15 hover:border-arcade-mint/50 transition-all flex items-center justify-between gap-3 shadow-md"
+              className="w-full p-2.5 rounded-2xl bg-white/5 border-2 border-white/20 hover:border-arcade-mint/50 transition-all flex items-center justify-between gap-3 shadow-lg"
             >
               <div className="flex items-center gap-3">
                 <div
-                  className="p-1 rounded-xl border shadow-lg"
+                  className="p-1 rounded-xl border-2 shadow-lg"
                   style={{ borderColor: selectedColorHex, backgroundColor: `${selectedColorHex}25` }}
                 >
                   <CuteCharacter
                     avatar={selectedAvatarId}
                     color={selectedColorHex}
-                    size={36}
+                    size={38}
                     mood="happy"
                   />
                 </div>
@@ -272,20 +303,21 @@ const ThemedJoinScreen: React.FC<{
                   <div className="font-arcade text-xs text-white flex items-center gap-1.5">
                     <span>{currentAvatar.name}</span>
                   </div>
-                  <span className="font-mono text-[10px] text-white/50 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: selectedColorHex }} />
+                  <span className="font-mono text-[10px] text-white/60 flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full inline-block ring-1 ring-white/30" style={{ backgroundColor: selectedColorHex }} />
                     {currentColorObj.name}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 text-arcade-mint font-mono text-xs pr-2">
-                <span>{isGalleryOpen ? 'CLOSE' : 'CUSTOMIZE'}</span>
+              <div className="flex items-center gap-1.5 text-arcade-mint font-mono text-xs font-bold pr-2">
+                <Sliders className="w-3.5 h-3.5" />
+                <span>{isGalleryOpen ? 'CLOSE' : 'GALLERY'}</span>
                 {isGalleryOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </div>
             </button>
 
-            {/* 4. Interactive Expandable Gallery Dropdown */}
+            {/* Expandable Character & Aura Color Gallery Dropdown */}
             <AnimatePresence>
               {isGalleryOpen && (
                 <motion.div
@@ -294,11 +326,11 @@ const ThemedJoinScreen: React.FC<{
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden pt-2"
                 >
-                  <div className="p-4 rounded-2xl bg-black/80 border-2 border-arcade-mint/30 space-y-4 shadow-2xl">
+                  <div className="p-4 rounded-2xl bg-black/90 border-2 border-arcade-mint/40 space-y-4 shadow-2xl">
                     {/* Character Avatars Gallery Grid */}
                     <div className="space-y-1.5">
-                      <span className="text-[10px] font-mono text-white/60 uppercase font-bold">
-                        1. SELECT CHARACTER (8 PILOTS)
+                      <span className="text-[10px] font-mono text-arcade-mint uppercase font-bold flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3" /> SELECT PILOT (8 AVATARS)
                       </span>
                       <div className="grid grid-cols-4 gap-2">
                         {PLAYER_AVATARS.map((av) => {
@@ -311,9 +343,9 @@ const ThemedJoinScreen: React.FC<{
                                 soundManager.playClick(950);
                                 setSelectedAvatarId(av.id);
                               }}
-                              className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                              className={`p-2 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all ${
                                 isSelected
-                                  ? 'border-arcade-mint bg-arcade-mint/20 text-arcade-mint shadow-glow-mint scale-105'
+                                  ? 'border-arcade-mint bg-arcade-mint/25 text-arcade-mint shadow-glow-mint scale-105'
                                   : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
                               }`}
                             >
@@ -334,8 +366,8 @@ const ThemedJoinScreen: React.FC<{
 
                     {/* Hologram Aura Colors Grid */}
                     <div className="space-y-1.5 border-t border-white/10 pt-3">
-                      <span className="text-[10px] font-mono text-white/60 uppercase font-bold">
-                        2. SELECT AURA COLOR (8 NEON HUES)
+                      <span className="text-[10px] font-mono text-arcade-amber uppercase font-bold flex items-center gap-1.5">
+                        <Zap className="w-3 h-3" /> SELECT AURA COLOR (8 HUES)
                       </span>
                       <div className="grid grid-cols-4 gap-2">
                         {COLOR_PALETTE.map((c) => {
@@ -350,12 +382,12 @@ const ThemedJoinScreen: React.FC<{
                               }}
                               className={`p-1.5 rounded-xl border flex items-center gap-2 transition-all ${
                                 isSelected
-                                  ? 'border-white bg-white/15 shadow-lg scale-102'
+                                  ? 'border-white bg-white/20 shadow-lg scale-102 ring-1 ring-white'
                                   : 'border-white/10 bg-white/5 hover:border-white/20'
                               }`}
                             >
                               <span
-                                className="w-5 h-5 rounded-full ring-1 ring-white/30 shrink-0"
+                                className="w-5 h-5 rounded-full ring-1 ring-white/40 shrink-0"
                                 style={{ backgroundColor: c.hex }}
                               />
                               <span className="text-[9px] font-mono text-white/80 truncate">
@@ -372,13 +404,13 @@ const ThemedJoinScreen: React.FC<{
             </AnimatePresence>
           </div>
 
-          {/* 5. Connect Controller Button */}
+          {/* 4. Action Button with Cyber Glow */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
             type="submit"
             disabled={isJoining}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-arcade-cyan via-teal-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_35px_rgba(0,229,255,0.6)] border-2 border-white/40 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 mt-2"
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-arcade-cyan via-teal-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_35px_rgba(0,229,255,0.7)] border-2 border-white/50 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 mt-2"
           >
             {isJoining ? 'SYNCHRONIZING...' : 'CONNECT CONTROLLER ▶'}
           </motion.button>
@@ -611,7 +643,7 @@ const ArcadeController: React.FC<{
   const action2Label = gameId === 'last-platform' ? '⚡ FREEZE' : '📡 EMP';
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#07080E] flex flex-col justify-between p-3 select-none touch-none overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#07080E] flex flex-col justify-between p-3 select-none touch-none overflow-hidden font-display">
       {/* Top Status Strip */}
       <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl">
         <span className="font-arcade text-xs text-white">
