@@ -11,6 +11,15 @@ export class ParticleSystem {
   private maxShakeOffset: number = 18;
   private maxShakeAngle: number = 0.05; // radians
 
+  public spawnParticle(p: Particle): void {
+    const maxParticles = 500;
+    if (this.particles.length >= maxParticles) {
+      this.particles[0] = p;
+    } else {
+      this.particles.push(p);
+    }
+  }
+
   public update(dt: number): void {
     // 1. Update particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -18,7 +27,11 @@ export class ParticleSystem {
       p.life += dt;
 
       if (p.life >= p.maxLife) {
-        this.particles.splice(i, 1);
+        const last = this.particles.length - 1;
+        if (i !== last) {
+          this.particles[i] = this.particles[last];
+        }
+        this.particles.pop();
         continue;
       }
 
@@ -131,7 +144,7 @@ export class ParticleSystem {
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2;
       const speed = 200 + Math.random() * 250;
-      this.particles.push({
+      this.spawnParticle({
         x,
         y,
         z: 4,
@@ -157,7 +170,7 @@ export class ParticleSystem {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 40 + Math.random() * 120;
-      this.particles.push({
+      this.spawnParticle({
         x: x + (Math.random() - 0.5) * 30,
         y: y + (Math.random() - 0.5) * 30,
         z: 0,
@@ -189,7 +202,7 @@ export class ParticleSystem {
       const tangentVx = -Math.sin(spiralAngle) * 90;
       const tangentVy = Math.cos(spiralAngle) * 90;
 
-      this.particles.push({
+      this.spawnParticle({
         x: x + Math.cos(spiralAngle) * dist,
         y: y + Math.sin(spiralAngle) * dist,
         z,
@@ -215,7 +228,7 @@ export class ParticleSystem {
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2;
       const speed = 30 + Math.random() * 50;
-      this.particles.push({
+      this.spawnParticle({
         x,
         y,
         z: 0,
@@ -240,7 +253,7 @@ export class ParticleSystem {
     const count = 16;
     for (let i = 0; i < count; i++) {
       const offset = (Math.random() - 0.5) * 15;
-      this.particles.push({
+      this.spawnParticle({
         x: x + offset,
         y: y + offset,
         z,
@@ -268,7 +281,7 @@ export class ParticleSystem {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 80 + Math.random() * 300;
-      this.particles.push({
+      this.spawnParticle({
         x,
         y,
         z: -20,
