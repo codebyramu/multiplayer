@@ -175,23 +175,23 @@ export const SOUND_REGISTRY: Record<SoundEffectKey, SoundEffectDefinition> = {
 // ----------------------------------------------------------------------------
 export const MUSIC_REGISTRY: Record<MusicTrackKey, MusicTrackDefinition> = {
   lobby: {
-    name: 'Chill Synthwave Lobby',
-    file: undefined, // E.g. '/audio/music/lobby.mp3'
-    volume: 0.45,
+    name: 'Chill Cyberpunk Street',
+    file: '/audio/music/lobby_cyberpunk.mp3',
+    volume: 0.40,
     bpm: 110,
     key: 'Am',
   },
   ingame: {
-    name: 'High-Octane Cyber Chiptune',
-    file: undefined, // E.g. '/audio/music/ingame.mp3'
-    volume: 0.40,
+    name: 'Electronic Future Beats',
+    file: '/audio/music/ingame_aggressive.mp3',
+    volume: 0.38,
     bpm: 130,
     key: 'Dm',
   },
   'final-duel': {
-    name: 'Final Duel Surge',
-    file: undefined, // E.g. '/audio/music/final_duel.mp3'
-    volume: 0.50,
+    name: 'Calm Ambient Resonance',
+    file: '/audio/music/calm_ambient.mp3',
+    volume: 0.45,
     bpm: 148,
     key: 'Em',
   },
