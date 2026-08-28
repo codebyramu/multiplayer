@@ -720,8 +720,30 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
             </div>
           </GlassPanel>
 
-          {/* Audio & Pause Toggle */}
+          {/* Audio, Camera Mode & Pause Controls */}
           <div className="flex items-center gap-2">
+            {room.selectedGame === 'serpent-arena' && (
+              <button
+                onClick={() => {
+                  soundManager.playClick(1050);
+                  if (engineRef.current?.toggleCameraMode) {
+                    const nextMode = engineRef.current.toggleCameraMode();
+                    showBannerAnnouncement({
+                      type: 'general',
+                      text: nextMode === 'overview' ? '📷 CAMERA: FULL ARENA VIEW' : '📷 CAMERA: DYNAMIC TRACKING',
+                      color: '#00E5FF',
+                      icon: '📷',
+                    });
+                  }
+                }}
+                className="px-3.5 py-2.5 rounded-2xl bg-black/75 border border-arcade-cyan/40 text-arcade-cyan hover:bg-arcade-cyan/20 backdrop-blur-md transition-all shadow-md active:scale-95 flex items-center gap-1.5 font-mono text-xs font-bold"
+                title="Toggle Camera View (Dynamic vs Full Arena)"
+              >
+                <span>📷</span>
+                <span className="hidden sm:inline">VIEW</span>
+              </button>
+            )}
+
             <button
               onClick={toggleMute}
               className="p-3 rounded-2xl bg-black/75 border border-white/15 text-arcade-cream hover:bg-white/10 backdrop-blur-md transition-all shadow-md active:scale-95"

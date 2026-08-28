@@ -1412,11 +1412,22 @@ export class SerpentArenaEngine {
   // CAMERA & BACKGROUND RENDERING
   // -------------------------------------------------------------
 
+  // Camera View Mode: 'dynamic' (Auto-zoom Centroid) or 'overview' (Full Arena Wide View)
+  public cameraMode: 'dynamic' | 'overview' = 'dynamic';
+
+  public setCameraMode(mode: 'dynamic' | 'overview'): void {
+    this.cameraMode = mode;
+  }
+
+  public toggleCameraMode(): 'dynamic' | 'overview' {
+    this.cameraMode = this.cameraMode === 'dynamic' ? 'overview' : 'dynamic';
+    return this.cameraMode;
+  }
+
   /**
    * Dynamic Multiplayer Group Camera:
-   * 1. Focuses strictly on living snake HEAD positions (heavily weighted toward human players + forward lookahead along headAngle).
-   * 2. Dynamically encloses all living snake heads with a minimum 280px margin buffer on all sides so snake heads never go out of frame.
-   * 3. Smooth lerp damping (0.08 to 0.12) to prevent jitter.
+   * 1. 'overview': Fits whole 2700px diameter arena inside the TV screen with generous border margins.
+   * 2. 'dynamic': Smoothly focuses on living snake HEAD positions with forward lookahead and safety margins.
    */
   private updateCamera(width: number, height: number, focusPlayerId?: string): void {
     const validWidth = width > 0 && isFinite(width) ? width : 1600;
@@ -1424,6 +1435,17 @@ export class SerpentArenaEngine {
     const R = this.config.arenaRadius;
     const minArenaZoom = Math.min(validWidth, validHeight) / (R * 2.35); // Fits whole arena comfortably with padding
     const maxZoom = 1.08; // Intimate close-up when players are dueling closely
+
+    // OVERVIEW CAMERA MODE: Full Arena Wide Angle
+    if (this.cameraMode === 'overview') {
+      this.camera.targetX = 0;
+      this.camera.targetY = 0;
+      this.camera.targetZoom = minArenaZoom;
+      this.camera.x += (this.camera.targetX - this.camera.x) * 0.12;
+      this.camera.y += (this.camera.targetY - this.camera.y) * 0.12;
+      this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * 0.10;
+      return;
+    }
 
     // 1. If explicit focusPlayerId is requested and active, frame that player's head strictly
     if (focusPlayerId && this.serpents[focusPlayerId] && !this.serpents[focusPlayerId].isDead) {

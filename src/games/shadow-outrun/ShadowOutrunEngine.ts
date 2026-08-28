@@ -1251,7 +1251,7 @@ export class ShadowOutrunEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // AUTHORITATIVE DYNAMIC CAMERA SYSTEM
+  // AUTHORITATIVE DYNAMIC CAMERA SYSTEM (SMOOTH MULTI-PLAYER ADAPTIVE FRAMING)
   // ---------------------------------------------------------------------------
   private updateCamera(dt: number): void {
     let targetX = this.width / 2;
@@ -1261,24 +1261,52 @@ export class ShadowOutrunEngine {
     if (localPlayer) {
       targetX = localPlayer.x;
       targetY = localPlayer.y;
-      this.camera.targetZoom = localPlayer.isDashing ? 1.05 : 1.15;
+      this.camera.targetZoom = localPlayer.isDashing ? 0.95 : 1.05;
     } else {
-      // Spectator / Host View: Focus on centroid of active players
+      // Spectator / Host View: Focus on centroid and frame all active fugitives & catchers
       const activePlayers = Array.from(this.players.values()).filter((p) => !p.isArrested);
       if (activePlayers.length > 0) {
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
         let sumX = 0;
         let sumY = 0;
+
         activePlayers.forEach((p) => {
           sumX += p.x;
           sumY += p.y;
+          minX = Math.min(minX, p.x);
+          maxX = Math.max(maxX, p.x);
+          minY = Math.min(minY, p.y);
+          maxY = Math.max(maxY, p.y);
         });
+
         targetX = sumX / activePlayers.length;
         targetY = sumY / activePlayers.length;
+
+        // Dynamic multi-player zoom calculation based on player spread
+        const spanX = Math.max(400, (maxX - minX) + 360);
+        const spanY = Math.max(300, (maxY - minY) + 360);
+        const zoomX = 1400 / spanX;
+        const zoomY = 900 / spanY;
+        const calculatedZoom = Math.max(0.55, Math.min(1.15, Math.min(zoomX, zoomY)));
+        this.camera.targetZoom = calculatedZoom;
+      } else {
+        targetX = this.width / 2;
+        targetY = this.height / 2;
+        this.camera.targetZoom = 0.65;
       }
     }
 
-    // Smooth LERP camera tracking
-    const lerpFactor = 1 - Math.exp(-6 * dt);
+    // Clamp camera within map bounds with padding
+    const halfViewW = (1200 / (this.camera.zoom || 1)) * 0.5;
+    const halfViewH = (800 / (this.camera.zoom || 1)) * 0.5;
+    targetX = Math.max(Math.min(targetX, this.width - halfViewW), halfViewW);
+    targetY = Math.max(Math.min(targetY, this.height - halfViewH), halfViewH);
+
+    // Smooth LERP camera tracking (no jerky teleportation)
+    const lerpFactor = 1 - Math.exp(-7 * dt);
     this.camera.x += (targetX - this.camera.x) * lerpFactor;
     this.camera.y += (targetY - this.camera.y) * lerpFactor;
     this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * lerpFactor;
