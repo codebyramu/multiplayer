@@ -112,7 +112,11 @@ export class SerpentArenaEngine {
     this.particleSystem = new SerpentParticleSystem();
     this.nextGoldenStormTimer = this.hasModifier('chaos_mode') ? 5 : 15; // First storm spawns at 15s (or 5s in Chaos Mode)
     this.nextSingularityVortexTimer = this.hasModifier('chaos_mode') ? 10 : 25; // First vortex at 25s (or 10s in Chaos Mode)
-    this.matchTimeRemaining = this.config.roundDuration;
+    
+    // Set match duration (if roundDuration === 0, endless mode with infinite timer)
+    this.matchTimeRemaining = (this.config.roundDuration && this.config.roundDuration > 0)
+      ? this.config.roundDuration
+      : Infinity;
 
     this.initAmbientFood();
 

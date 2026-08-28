@@ -288,7 +288,8 @@ export const App: React.FC = () => {
   const handleUpdateBots = (count: number) => {
     if (!room) return;
     socketClient.updateSettings(count);
-    const updatedPlayers = LocalRoomEngine.generateBots(count, room.players);
+    const diff = room.config?.difficulty === 'easy' ? 'easy' : room.config?.difficulty === 'hard' ? 'hard' : 'medium';
+    const updatedPlayers = LocalRoomEngine.generateBots(count, room.players, diff);
     setRoom((prev) => (prev ? { ...prev, botCount: count, players: updatedPlayers } : prev));
     tournamentEngine.syncPlayers(updatedPlayers);
   };
@@ -297,7 +298,22 @@ export const App: React.FC = () => {
   const handleUpdateDifficulty = (difficulty: 'easy' | 'normal' | 'hard' | 'extreme') => {
     if (!room) return;
     socketClient.updateSettings(room.botCount, { difficulty });
-    setRoom((prev) => (prev ? { ...prev, config: { ...prev.config, difficulty } } : prev));
+    const targetDiff: 'easy' | 'medium' | 'hard' = difficulty === 'easy' ? 'easy' : difficulty === 'hard' ? 'hard' : 'medium';
+    
+    setRoom((prev) => {
+      if (!prev) return prev;
+      const updatedPlayers = { ...prev.players };
+      for (const pid in updatedPlayers) {
+        if (updatedPlayers[pid].isBot) {
+          updatedPlayers[pid] = { ...updatedPlayers[pid], difficulty: targetDiff };
+        }
+      }
+      return {
+        ...prev,
+        config: { ...prev.config, difficulty },
+        players: updatedPlayers,
+      };
+    });
   };
 
   // 6. HOST: Start Match (Countdown -> Game)

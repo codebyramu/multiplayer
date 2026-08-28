@@ -789,6 +789,75 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
             </GlassPanel>
           )}
 
+          {/* ═══════════════════════════════════════════════════
+               2.5. SERPENT ARENA MATCH MODE SELECTOR (TIMED 2M/3M/5M vs ENDLESS LAST STANDING)
+             ═══════════════════════════════════════════════════ */}
+          {room.selectedGame === 'serpent-arena' && (
+            <GlassPanel className="p-5 space-y-4 border-2 border-arcade-mint/40 bg-gradient-to-br from-arcade-mint/10 via-black/80 to-black shadow-[0_0_40px_rgba(0,245,160,0.2)]">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-arcade-mint/20 border border-arcade-mint/50 flex items-center justify-center text-base">
+                    🐍
+                  </div>
+                  <div>
+                    <h3 className="font-arcade text-sm sm:text-base font-black text-white tracking-wide">
+                      SERPENT ARENA: MATCH MODE
+                    </h3>
+                    <p className="text-xs font-mono text-arcade-mint">
+                      Choose between Timed High-Score Point Battle or Endless Last Serpent Standing
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-black/60 border border-arcade-mint/40">
+                  <span className="text-[10px] font-mono text-white/60 uppercase font-bold">MODE:</span>
+                  <span className="font-arcade text-xs text-arcade-mint font-black">
+                    {room.config?.roundDuration === 0 || !room.config?.respawnEnabled
+                      ? '👑 ENDLESS (LAST STANDING)'
+                      : `⏱️ TIMED (${Math.round((room.config?.roundDuration || 120) / 60)} MIN)`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {[
+                  { id: 'timed_2', label: '⏱️ 2 MIN TIMED', duration: 120, respawn: true, desc: 'Highest Score Wins' },
+                  { id: 'timed_3', label: '⏱️ 3 MIN TIMED', duration: 180, respawn: true, desc: 'High-Score Battle' },
+                  { id: 'timed_5', label: '⏱️ 5 MIN TIMED', duration: 300, respawn: true, desc: 'Endurance Championship' },
+                  { id: 'endless', label: '👑 ENDLESS BATTLE', duration: 0, respawn: false, desc: 'Last One Standing Wins' },
+                ].map((mode) => {
+                  const isCurrent = mode.respawn
+                    ? room.config?.respawnEnabled !== false && room.config?.roundDuration === mode.duration
+                    : room.config?.respawnEnabled === false || room.config?.roundDuration === 0;
+
+                  return (
+                    <button
+                      key={mode.id}
+                      onClick={() => {
+                        soundManager.playClick(1050);
+                        if (onUpdateDifficulty) {
+                          onUpdateDifficulty(currentDifficulty as any);
+                        }
+                        socketClient.updateSettings(room.botCount, {
+                          roundDuration: mode.duration,
+                          respawnEnabled: mode.respawn,
+                        });
+                      }}
+                      className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
+                        isCurrent
+                          ? 'border-arcade-mint bg-arcade-mint/20 text-white shadow-[0_0_20px_rgba(0,245,160,0.4)] scale-102'
+                          : 'border-white/10 bg-white/5 hover:border-white/20 text-white/70'
+                      }`}
+                    >
+                      <span className="font-arcade text-xs font-black text-white">{mode.label}</span>
+                      <span className="text-[10px] font-mono text-white/60 mt-1">{mode.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </GlassPanel>
+          )}
+
           {/* Bot Count + Bot Difficulty Controls */}
           <GlassPanel className="p-5 space-y-4 border-white/10">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

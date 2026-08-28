@@ -39,7 +39,7 @@ export class LocalRoomEngine {
     };
   }
 
-  public static generateBots(count: number, existingPlayers: Record<string, Player>): Record<string, Player> {
+  public static generateBots(count: number, existingPlayers: Record<string, Player>, defaultDifficulty: 'easy' | 'medium' | 'hard' = 'medium'): Record<string, Player> {
     const BOT_NAMES = ['ViperBot', 'CyberGhost', 'NeonGlider', 'TitanUnit', 'VoidStalker', 'ArcadeReaper', 'ShadowPulse'];
     const BOT_AVATARS = ['robot', 'skull', 'alien', 'flame', 'spark', 'diamond', 'crown'];
     const BOT_COLORS = ['#FF3366', '#FFB224', '#00E5FF', '#9D4EDD', '#00F5A0', '#FF7700', '#3A86FF'];
@@ -73,6 +73,7 @@ export class LocalRoomEngine {
         isHost: false,
         isBot: true,
         botArchetype: archetype,
+        difficulty: defaultDifficulty,
         isReady: true,
         score: 0,
         ping: 0,

@@ -115,6 +115,7 @@ export interface RoomState {
     roundDuration: number; // in seconds
     difficulty: 'easy' | 'medium' | 'normal' | 'hard' | 'extreme';
     powerupsEnabled: boolean;
+    respawnEnabled?: boolean;
     modifiers?: GameModifiers;
     selectedMap?: ShadowOutrunMapId;
   };

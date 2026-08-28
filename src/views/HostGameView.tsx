@@ -322,7 +322,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
       engineRef.current = engine;
     } else {
       // Default: SERPENT ARENA
-      const engine = new SerpentArenaEngine(playersMap, { roundDuration: room.config.roundDuration || 120 });
+      const engine = new SerpentArenaEngine(playersMap, {
+        roundDuration: typeof room.config.roundDuration === 'number' ? room.config.roundDuration : 120,
+        respawnEnabled: room.config.respawnEnabled !== false && room.config.roundDuration !== 0,
+      });
       engine.onEvent((evt) => {
         if (evt.type === 'eliminate') {
           const victim = evt.targetPlayerId ? room.players[evt.targetPlayerId]?.name : 'Serpent';
@@ -516,6 +519,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
             }
             if (Object.keys(allHuds).length > 0) {
               socketClient.broadcastGameState({ hud: allHuds });
+              try {
+                import('../multiplayer/P2PHostServer').then(({ p2pHostServer }) => {
+                  if (p2pHostServer.isReady) {
+                    p2pHostServer.broadcast('sync-game-state', { hud: allHuds });
+                  }
+                }).catch(() => {});
+              } catch {}
             }
 
             // Update HUD leaderboard
