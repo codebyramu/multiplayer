@@ -564,6 +564,11 @@ export class SerpentArenaEngine {
     snake.body[0].angle = snake.angle;
     snake.body[0].radius = snake.headRadius;
 
+    let minX = snake.x - snake.headRadius;
+    let maxX = snake.x + snake.headRadius;
+    let minY = snake.y - snake.headRadius;
+    let maxY = snake.y + snake.headRadius;
+
     let historyIndex = 0;
 
     for (let i = 1; i < segmentCount; i++) {
@@ -593,11 +598,22 @@ export class SerpentArenaEngine {
         segAngle = this.interpolateAngle(p1.angle, p2.angle, clampedT);
       }
 
+      const segRadius = this.computeSegmentRadius(i, segmentCount, snake.headRadius);
       snake.body[i].x = segX;
       snake.body[i].y = segY;
       snake.body[i].angle = segAngle;
-      snake.body[i].radius = this.computeSegmentRadius(i, segmentCount, snake.headRadius);
+      snake.body[i].radius = segRadius;
+
+      if (segX - segRadius < minX) minX = segX - segRadius;
+      if (segX + segRadius > maxX) maxX = segX + segRadius;
+      if (segY - segRadius < minY) minY = segY - segRadius;
+      if (segY + segRadius > maxY) maxY = segY + segRadius;
     }
+
+    snake.minX = minX;
+    snake.maxX = maxX;
+    snake.minY = minY;
+    snake.maxY = maxY;
   }
 
   private computeSegmentRadius(index: number, total: number, headRadius: number): number {
@@ -1059,9 +1075,8 @@ export class SerpentArenaEngine {
   // -------------------------------------------------------------
 
   private processCollisions(): void {
-    const snakes = Object.values(this.serpents);
-
-    for (const snake of snakes) {
+    for (const id in this.serpents) {
+      const snake = this.serpents[id];
       if (snake.isDead || snake.invulnerableTimer > 0) continue;
 
       const headX = snake.x;
@@ -1089,9 +1104,17 @@ export class SerpentArenaEngine {
         continue;
       }
 
+      // Precalculate head swept broadphase AABB bounding box
+      const sweptMinX = Math.min(snake.prevX, snake.x) - headR - 25;
+      const sweptMaxX = Math.max(snake.prevX, snake.x) + headR + 25;
+      const sweptMinY = Math.min(snake.prevY, snake.y) - headR - 25;
+      const sweptMaxY = Math.max(snake.prevY, snake.y) + headR + 25;
+
       // 2. CONTINUOUS HEAD-TO-HEAD & HEAD-TO-BODY COLLISION CHECKS
-      for (const other of snakes) {
-        if (other.id === snake.id || other.isDead) continue;
+      for (const otherId in this.serpents) {
+        if (otherId === id) continue;
+        const other = this.serpents[otherId];
+        if (other.isDead) continue;
 
         // A. Continuous Head-to-Head Collision Check
         if (other.invulnerableTimer <= 0) {
@@ -1120,8 +1143,32 @@ export class SerpentArenaEngine {
           continue;
         }
 
+        // COARSE AABB BROADPHASE CHECK:
+        // If swept head AABB does not overlap the other snake's total body AABB, skip all segments!
+        if (
+          other.minX !== undefined &&
+          (sweptMaxX < other.minX ||
+           sweptMinX > other.maxX! ||
+           sweptMaxY < other.minY! ||
+           sweptMinY > other.maxY!)
+        ) {
+          continue;
+        }
+
         for (let s = 0; s < other.body.length; s++) {
           const seg = other.body[s];
+          const segR = seg.radius;
+
+          // Segment coarse bounding box check
+          if (
+            seg.x + segR < sweptMinX ||
+            seg.x - segR > sweptMaxX ||
+            seg.y + segR < sweptMinY ||
+            seg.y - segR > sweptMaxY
+          ) {
+            continue;
+          }
+
           const dist = this.distToSegment(snake.prevX, snake.prevY, snake.x, snake.y, seg.x, seg.y);
 
           let minDist = dist;
@@ -1567,22 +1614,22 @@ export class SerpentArenaEngine {
 
     ctx.save();
 
-    // Outer Neon Glow Barrier
-    ctx.shadowBlur = 28;
-    ctx.shadowColor = '#FF3366';
-
+    // Outer Neon Glow Barrier (Layered strokes, 0 shadowBlur)
+    ctx.strokeStyle = 'rgba(255, 51, 102, 0.25)';
+    ctx.lineWidth = 14;
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.stroke();
+
     ctx.strokeStyle = '#FF3366';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 5;
     ctx.stroke();
 
     // Inner Secondary Electric Cyan Ring
-    ctx.shadowColor = '#00E5FF';
+    ctx.strokeStyle = '#00E5FF';
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, R - 6, 0, Math.PI * 2);
-    ctx.strokeStyle = '#00E5FF';
-    ctx.lineWidth = 2.5;
     ctx.stroke();
 
     // Hazard chevrons along perimeter
@@ -1693,9 +1740,13 @@ export class SerpentArenaEngine {
 
     ctx.restore();
 
-    // 3. Photon Sphere & Event Horizon Core (Void Black)
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = '#FF007F';
+    // 3. Photon Sphere & Event Horizon Core (Void Black with outer halo stroke)
+    ctx.strokeStyle = 'rgba(255, 0, 127, 0.4)';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(0, 0, vortex.radius * 0.6, 0, Math.PI * 2);
+    ctx.stroke();
+
     ctx.beginPath();
     ctx.arc(0, 0, vortex.radius * 0.55, 0, Math.PI * 2);
     ctx.fillStyle = '#040208';
@@ -1711,72 +1762,69 @@ export class SerpentArenaEngine {
 
   private renderFoodPellets(ctx: CanvasRenderingContext2D): void {
     for (const food of this.foods) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
-
       if (food.type === 'hyper_boost') {
-        // Cyan lightning pill with pulsating energy ring
-        ctx.shadowBlur = 18;
-        ctx.shadowColor = '#00E5FF';
-        ctx.fillStyle = '#00E5FF';
-        ctx.fill();
-
-        // Inner white energy core
-        ctx.beginPath();
-        ctx.arc(food.x, food.y, food.radius * 0.45, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fill();
-
-        // Outer pulsing ring
-        ctx.strokeStyle = '#00E5FF';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(food.x, food.y, food.radius * 1.4, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (food.type === 'ghost_hunt') {
-        // Spectral violet phantom orb with ethereal halo
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = '#C77DFF';
-        ctx.fillStyle = '#C77DFF';
-        ctx.fill();
-
-        // Inner phantom core
-        ctx.beginPath();
-        ctx.arc(food.x, food.y, food.radius * 0.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fill();
-
-        // Outer spectral ring
-        ctx.strokeStyle = '#E0AAFF';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 6]);
+        // Cyan lightning pill with pulsating energy ring (0 shadowBlur, 0 save/restore)
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.3)';
         ctx.beginPath();
         ctx.arc(food.x, food.y, food.radius * 1.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else if (food.type === 'golden_orb') {
-        ctx.shadowBlur = 16;
-        ctx.shadowColor = '#FFD700';
-        ctx.fillStyle = '#FFD700';
         ctx.fill();
 
-        // Inner white shine
+        ctx.fillStyle = '#00E5FF';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (food.type === 'ghost_hunt') {
+        // Spectral violet phantom orb with ethereal halo
+        ctx.fillStyle = 'rgba(199, 125, 255, 0.3)';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#C77DFF';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (food.type === 'golden_orb') {
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius * 1.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
         ctx.arc(food.x - food.radius * 0.25, food.y - food.radius * 0.25, food.radius * 0.35, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
         ctx.fill();
       } else if (food.type === 'jackpot') {
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = food.glowColor;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius * 1.3, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = food.color;
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.fillStyle = food.color;
+        ctx.beginPath();
+        ctx.arc(food.x, food.y, food.radius, 0, Math.PI * 2);
         ctx.fill();
       }
-
-      ctx.restore();
     }
   }
 

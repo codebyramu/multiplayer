@@ -546,7 +546,7 @@ export class VoidTagEngine {
     const steps = 6;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      this.particles.push({
+      this.spawnParticle({
         x: p.x + (targetX - p.x) * t,
         y: p.y + (targetY - p.y) * t,
         vx: (Math.random() - 0.5) * 40,
@@ -776,7 +776,7 @@ export class VoidTagEngine {
     for (let i = 0; i < 24; i++) {
       const angle = (i / 24) * Math.PI * 2;
       const speed = 80 + Math.random() * 120;
-      this.particles.push({
+      this.spawnParticle({
         x: victim.x,
         y: victim.y,
         vx: Math.cos(angle) * speed,
@@ -1013,7 +1013,7 @@ export class VoidTagEngine {
 
     // Hunter void wisp particles
     if (p.isHunter && Math.random() < 0.4) {
-      this.particles.push({
+      this.spawnParticle({
         x: p.x + (Math.random() - 0.5) * p.radius * 1.5,
         y: p.y + (Math.random() - 0.5) * p.radius * 1.5,
         vx: (Math.random() - 0.5) * 20,
@@ -1029,6 +1029,16 @@ export class VoidTagEngine {
     }
   }
 
+  public spawnParticle(p: Particle): void {
+    const maxParticles = 400;
+    if (this.particles.length >= maxParticles) {
+      // Overwrite oldest particle
+      this.particles[0] = p;
+    } else {
+      this.particles.push(p);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // PARTICLES, SHOCKWAVES & COMBAT TEXT UPDATES
   // --------------------------------------------------------------------------
@@ -1041,7 +1051,12 @@ export class VoidTagEngine {
       pt.y += pt.vy * dt;
 
       if (pt.life <= 0 || pt.alpha <= 0) {
-        this.particles.splice(i, 1);
+        // Fast swap-and-pop removal without splice()
+        const lastIdx = this.particles.length - 1;
+        if (i !== lastIdx) {
+          this.particles[i] = this.particles[lastIdx];
+        }
+        this.particles.pop();
       }
     }
   }

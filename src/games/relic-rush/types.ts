@@ -89,8 +89,13 @@ export interface PlayerRelicRushState {
   // Bot AI specific memory
   aiTargetId?: string;
   aiTargetRelicId?: string;
+  aiTargetX?: number;
+  aiTargetY?: number;
   aiState?: 'scavenge' | 'hunt' | 'flee' | 'defend';
   aiDecisionTimer?: number;
+  aiTickCount?: number;
+  cachedAction1?: boolean;
+  cachedAction2?: boolean;
 }
 
 export interface VaultHazardPit {

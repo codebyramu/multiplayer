@@ -514,13 +514,6 @@ export class ShadowOutrunEngine {
   // BOT AI (Catcher vs Thief Personalities)
   // ---------------------------------------------------------------------------
   private updateBotAI(dt: number): void {
-    const catchers = Array.from(this.players.values()).filter(
-      (p) => (p.role === 'catcher' || p.role === 'deputy') && !p.isArrested
-    );
-    const thieves = Array.from(this.players.values()).filter(
-      (p) => p.role === 'thief' && !p.isArrested
-    );
-
     const diff =
       this.config.difficulty === 'easy'
         ? 'easy'
@@ -528,15 +521,17 @@ export class ShadowOutrunEngine {
         ? 'hard'
         : 'medium';
 
-    this.players.forEach((bot, botIdx) => {
+    this.players.forEach((bot: ShadowOutrunPlayer) => {
       if (!bot.isBot || bot.isArrested) return;
 
+      const botHash = (bot.id.charCodeAt(bot.id.length - 1) || 0) % 5;
+      bot.aiTickCount = (bot.aiTickCount || botHash) + 1;
       bot.aiDecisionTimer = (bot.aiDecisionTimer || 0) - dt;
-      const needsDecision = (bot.aiDecisionTimer || 0) <= 0;
+      const isPerceptionTick = ((bot.aiTickCount || 0) % 5 === 0) || ((bot.aiDecisionTimer || 0) <= 0);
 
       // ----------------- CATCHER / DEPUTY BOT AI -----------------
       if (bot.role === 'catcher' || bot.role === 'deputy') {
-        if (needsDecision) {
+        if (isPerceptionTick) {
           bot.aiDecisionTimer =
             diff === 'easy'
               ? 0.30 + Math.random() * 0.1
@@ -544,27 +539,32 @@ export class ShadowOutrunEngine {
               ? 0.02
               : 0.14 + Math.random() * 0.08;
 
-          // Target Selection & Deputy Coordination
+          // Target Selection & Deputy Coordination (Single pass over players without array allocations)
           let bestTarget: ShadowOutrunPlayer | null = null;
+          let secondBestTarget: ShadowOutrunPlayer | null = null;
           let minTargetDist = Infinity;
+          let secondMinDist = Infinity;
 
-          // Rank thieves by distance & score
-          const rankedThieves = thieves
-            .map((t) => ({
-              thief: t,
-              dist: Math.hypot(t.x - bot.x, t.y - bot.y),
-              hasLOS: this.checkLineOfSight(bot.x, bot.y, t.x, t.y, true),
-            }))
-            .filter((t) => (t.hasLOS && t.dist < 750) || t.dist < 220)
-            .sort((a, b) => a.dist - b.dist);
+          for (const p of this.players.values()) {
+            if (p.role !== 'thief' || p.isArrested) continue;
+            const dist = Math.hypot(p.x - bot.x, p.y - bot.y);
+            const hasLOS = this.checkLineOfSight(bot.x, bot.y, p.x, p.y, true);
+            const isReachable = (hasLOS && dist < 750) || dist < 220;
+            if (!isReachable) continue;
 
-          if (rankedThieves.length > 0) {
-            if (diff === 'hard' && bot.role === 'deputy' && rankedThieves.length > 1) {
-              // Hard Deputy Coordination: Deputy flanks secondary thief or covers alternate route
-              bestTarget = rankedThieves[1].thief;
-            } else {
-              bestTarget = rankedThieves[0].thief;
+            if (dist < minTargetDist) {
+              secondMinDist = minTargetDist;
+              secondBestTarget = bestTarget;
+              minTargetDist = dist;
+              bestTarget = p;
+            } else if (dist < secondMinDist) {
+              secondMinDist = dist;
+              secondBestTarget = p;
             }
+          }
+
+          if (diff === 'hard' && bot.role === 'deputy' && secondBestTarget) {
+            bestTarget = secondBestTarget;
           }
 
           if (bestTarget) {
@@ -582,46 +582,48 @@ export class ShadowOutrunEngine {
                 bot.aiTargetX = predX;
                 bot.aiTargetY = predY;
               } else {
-                // Find corner or doorway to intercept corridor
                 let bestCornerX = predX;
                 let bestCornerY = predY;
                 let minCornerDist = Infinity;
 
-                for (const wall of this.map.walls) {
+                for (let w = 0; w < this.map.walls.length; w++) {
+                  const wall = this.map.walls[w];
                   if (wall.isGlass) continue;
-                  const corners = [
-                    { x: wall.x - 30, y: wall.y - 30 },
-                    { x: wall.x + wall.width + 30, y: wall.y - 30 },
-                    { x: wall.x - 30, y: wall.y + wall.height + 30 },
-                    { x: wall.x + wall.width + 30, y: wall.y + wall.height + 30 },
-                  ];
 
-                  for (const c of corners) {
-                    const dToPred = Math.hypot(c.x - predX, c.y - predY);
-                    const dToBot = Math.hypot(c.x - bot.x, c.y - bot.y);
-                    if (dToPred < 180 && dToBot < minCornerDist) {
-                      minCornerDist = dToBot;
-                      bestCornerX = c.x;
-                      bestCornerY = c.y;
-                    }
-                  }
+                  const c1x = wall.x - 30, c1y = wall.y - 30;
+                  const c2x = wall.x + wall.width + 30, c2y = wall.y - 30;
+                  const c3x = wall.x - 30, c3y = wall.y + wall.height + 30;
+                  const c4x = wall.x + wall.width + 30, c4y = wall.y + wall.height + 30;
+
+                  const d1p = Math.hypot(c1x - predX, c1y - predY);
+                  const d1b = Math.hypot(c1x - bot.x, c1y - bot.y);
+                  if (d1p < 180 && d1b < minCornerDist) { minCornerDist = d1b; bestCornerX = c1x; bestCornerY = c1y; }
+
+                  const d2p = Math.hypot(c2x - predX, c2y - predY);
+                  const d2b = Math.hypot(c2x - bot.x, c2y - bot.y);
+                  if (d2p < 180 && d2b < minCornerDist) { minCornerDist = d2b; bestCornerX = c2x; bestCornerY = c2y; }
+
+                  const d3p = Math.hypot(c3x - predX, c3y - predY);
+                  const d3b = Math.hypot(c3x - bot.x, c3y - bot.y);
+                  if (d3p < 180 && d3b < minCornerDist) { minCornerDist = d3b; bestCornerX = c3x; bestCornerY = c3y; }
+
+                  const d4p = Math.hypot(c4x - predX, c4y - predY);
+                  const d4b = Math.hypot(c4x - bot.x, c4y - bot.y);
+                  if (d4p < 180 && d4b < minCornerDist) { minCornerDist = d4b; bestCornerX = c4x; bestCornerY = c4y; }
                 }
                 bot.aiTargetX = bestCornerX;
                 bot.aiTargetY = bestCornerY;
               }
             } else if (diff === 'medium') {
-              // Medium: Direct chase with slight lead
               bot.aiTargetX = bestTarget.x + bestTarget.vx * 0.3;
               bot.aiTargetY = bestTarget.y + bestTarget.vy * 0.3;
             } else {
-              // Easy: Direct chase, no lead
               bot.aiTargetX = bestTarget.x;
               bot.aiTargetY = bestTarget.y;
             }
           } else {
             bot.aiState = 'patrol';
             bot.aiTargetPlayerId = undefined;
-            // Patrol towards random coin spawn location
             if (!bot.aiTargetX || Math.hypot(bot.aiTargetX - bot.x, bot.aiTargetY! - bot.y) < 70) {
               const randPoint = this.map.coinSpawnPoints[
                 Math.floor(Math.random() * this.map.coinSpawnPoints.length)
@@ -632,14 +634,13 @@ export class ShadowOutrunEngine {
           }
         }
 
-        // Steer & aim flashlight torch
+        // Steer & aim flashlight torch with smooth lerp
         if (bot.aiTargetX !== undefined && bot.aiTargetY !== undefined) {
           const dx = bot.aiTargetX - bot.x;
           const dy = bot.aiTargetY - bot.y;
           const targetHeading = Math.atan2(dy, dx);
 
           if (diff === 'easy') {
-            // Easy: Casually sweeps torch with oscillating sine wave sweep
             const charCode = bot.id.charCodeAt(0) || 0;
             const sweepOffset = Math.sin(this.globalTime * 1.8 + charCode) * 0.6;
             const desiredAngle = bot.aiState === 'hunt' ? targetHeading : targetHeading + sweepOffset;
@@ -649,8 +650,11 @@ export class ShadowOutrunEngine {
             bot.beamAngle += angleDiff * Math.min(1.0, 3.5 * dt);
             bot.angle = bot.beamAngle;
           } else {
-            bot.beamAngle = targetHeading;
-            bot.angle = targetHeading;
+            let angleDiff = targetHeading - bot.angle;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            bot.angle += angleDiff * Math.min(1.0, 14.0 * dt);
+            bot.beamAngle = bot.angle;
           }
 
           bot.vx = Math.cos(bot.angle) * bot.currentSpeed;
@@ -681,7 +685,7 @@ export class ShadowOutrunEngine {
 
       // ----------------- THIEF BOT AI -----------------
       else if (bot.role === 'thief') {
-        if (needsDecision) {
+        if (isPerceptionTick) {
           bot.aiDecisionTimer =
             diff === 'easy'
               ? 0.30 + Math.random() * 0.1
@@ -689,11 +693,12 @@ export class ShadowOutrunEngine {
               ? 0.03
               : 0.12 + Math.random() * 0.06;
 
-          // 1. Check danger from nearest catcher
+          // 1. Check danger from nearest catcher (single pass without catchers array allocation)
           let nearestCatcher: ShadowOutrunPlayer | null = null;
           let minCatcherDist = Infinity;
 
-          for (const catcher of catchers) {
+          for (const catcher of this.players.values()) {
+            if ((catcher.role !== 'catcher' && catcher.role !== 'deputy') || catcher.isArrested) continue;
             const dist = Math.hypot(catcher.x - bot.x, catcher.y - bot.y);
             if (dist < minCatcherDist) {
               minCatcherDist = dist;
@@ -724,7 +729,6 @@ export class ShadowOutrunEngine {
                 const clearToProbe = this.checkLineOfSight(bot.x, bot.y, probeX, probeY, false);
                 if (!clearToProbe) continue;
 
-                // Evaluate score: distance from catcher + wall occlusion bonus
                 const dCatcher = Math.hypot(probeX - nearestCatcher.x, probeY - nearestCatcher.y);
                 const hasLOSFromCatcher = this.checkLineOfSight(nearestCatcher.x, nearestCatcher.y, probeX, probeY, false);
                 const occlusionBonus = !hasLOSFromCatcher ? 400 : 0;
@@ -736,12 +740,10 @@ export class ShadowOutrunEngine {
                 }
               }
 
-              // Dynamic zigzag lateral oscillation around pillars
               const zigzagOffset = Math.sin(this.globalTime * 9 + bot.id.charCodeAt(0)) * 0.55;
               bot.aiTargetX = bot.x + Math.cos(bestAngle + zigzagOffset) * 320;
               bot.aiTargetY = bot.y + Math.sin(bestAngle + zigzagOffset) * 320;
 
-              // Hard Evasive panic dash
               if ((bot.isSlowed || minCatcherDist < 200) && bot.dashCooldown <= 0 && !bot.isDashing) {
                 bot.isDashing = true;
                 bot.dashTimer = 0.6;
@@ -750,18 +752,17 @@ export class ShadowOutrunEngine {
                 if (this.onSound) this.onSound('boost', 1000);
               }
             } else if (diff === 'medium') {
-              // Medium: Break line of sight behind solid walls
               let foundHidingSpot = false;
               let bestHideX = bot.x;
               let bestHideY = bot.y;
               let minHideDist = Infinity;
 
-              for (const wall of this.map.walls) {
+              for (let w = 0; w < this.map.walls.length; w++) {
+                const wall = this.map.walls[w];
                 if (wall.isGlass) continue;
                 const dWall = Math.hypot(wall.x + wall.width / 2 - bot.x, wall.y + wall.height / 2 - bot.y);
                 if (dWall > 350) continue;
 
-                // Potential shadow spot behind wall relative to catcher
                 const wallCenterX = wall.x + wall.width / 2;
                 const wallCenterY = wall.y + wall.height / 2;
                 const awayDirX = wallCenterX - nearestCatcher.x;
@@ -794,7 +795,6 @@ export class ShadowOutrunEngine {
                 bot.aiTargetY = bot.y + Math.sin(fleeAngle) * 320;
               }
 
-              // Medium panic dash if slowed
               if (bot.isSlowed && bot.dashCooldown <= 0 && !bot.isDashing) {
                 bot.isDashing = true;
                 bot.dashTimer = 0.6;
@@ -803,9 +803,8 @@ export class ShadowOutrunEngine {
                 if (this.onSound) this.onSound('boost', 1000);
               }
             } else {
-              // Easy: Occasional mistakes and getting cornered
               const fleeAngle = Math.atan2(bot.y - nearestCatcher.y, bot.x - nearestCatcher.x);
-              const mistakeJitter = (Math.random() - 0.5) * 2.0; // Significant jitter causes bot to get stuck/cornered
+              const mistakeJitter = (Math.random() - 0.5) * 2.0;
               bot.aiTargetX = bot.x + Math.cos(fleeAngle + mistakeJitter) * 280;
               bot.aiTargetY = bot.y + Math.sin(fleeAngle + mistakeJitter) * 280;
 
@@ -818,7 +817,6 @@ export class ShadowOutrunEngine {
               }
             }
           } else {
-            // Safe: Scavenge coins
             bot.aiState = 'scavenge';
             let nearestCoin: CoinEntity | null = null;
             let minCoinDist = Infinity;
@@ -843,15 +841,19 @@ export class ShadowOutrunEngine {
           }
         }
 
-        // Steer towards target waypoint
+        // Steer towards target waypoint with smooth lerp
         if (bot.aiTargetX !== undefined && bot.aiTargetY !== undefined) {
           const dx = bot.aiTargetX - bot.x;
           const dy = bot.aiTargetY - bot.y;
-          const angle = Math.atan2(dy, dx);
+          const targetAngle = Math.atan2(dy, dx);
 
-          bot.angle = angle;
-          bot.vx = Math.cos(angle) * bot.currentSpeed;
-          bot.vy = Math.sin(angle) * bot.currentSpeed;
+          let angleDiff = targetAngle - bot.angle;
+          while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          bot.angle += angleDiff * Math.min(1.0, 14.0 * dt);
+
+          bot.vx = Math.cos(bot.angle) * bot.currentSpeed;
+          bot.vy = Math.sin(bot.angle) * bot.currentSpeed;
         }
       }
     });

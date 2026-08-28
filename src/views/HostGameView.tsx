@@ -9,6 +9,7 @@ import { LastPlatformEngine } from '../games/last-platform';
 import { SerpentArenaEngine } from '../games/serpent-arena';
 import { ShadowOutrunEngine } from '../games/shadow-outrun';
 import { socketClient } from '../multiplayer/SocketClient';
+import { p2pHostServer } from '../multiplayer/P2PHostServer';
 import { soundManager } from '../audio/SoundManager';
 import { GlassPanel } from '../components/ui/GlassPanel';
 import { ArcadeButton } from '../components/ui/ArcadeButton';
@@ -18,7 +19,8 @@ import {
 
 interface HostGameViewProps {
   room: RoomState;
-  remoteInputs: Record<string, ControllerInput>;
+  remoteInputs?: Record<string, ControllerInput>;
+  remoteInputsRef?: React.MutableRefObject<Record<string, ControllerInput>>;
   onBroadcastHUDState?: (hudState: PlayerClientHUDState) => void;
   onGameEvent?: (event: GameEventPayload) => void;
   onMatchEnd: (results: MatchResults) => void;
@@ -38,6 +40,7 @@ interface BannerAnnouncement {
 export const HostGameView: React.FC<HostGameViewProps> = ({
   room,
   remoteInputs,
+  remoteInputsRef: propRemoteInputsRef,
   onBroadcastHUDState,
   onGameEvent,
   onMatchEnd,
@@ -48,6 +51,30 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
   const lastUIUpdateRef = useRef<number>(0);
+
+  // Mutable internal inputs ref to prevent ANY React re-renders on remote controller input packets
+  const internalInputsRef = useRef<Record<string, ControllerInput>>(remoteInputs || {});
+
+  useEffect(() => {
+    const unbindSocket = socketClient.on('client-input', (data: { playerId: string; input: ControllerInput }) => {
+      internalInputsRef.current[data.playerId] = data.input;
+      if (propRemoteInputsRef) {
+        propRemoteInputsRef.current[data.playerId] = data.input;
+      }
+    });
+
+    const unbindP2P = p2pHostServer.on('client-input', (data: { playerId: string; input: ControllerInput }) => {
+      internalInputsRef.current[data.playerId] = data.input;
+      if (propRemoteInputsRef) {
+        propRemoteInputsRef.current[data.playerId] = data.input;
+      }
+    });
+
+    return () => {
+      unbindSocket();
+      unbindP2P();
+    };
+  }, [propRemoteInputsRef]);
 
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [matchTime, setMatchTime] = useState<number>(room.config.roundDuration || 90);
@@ -368,6 +395,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      soundManager.stopAllSounds();
     };
   }, [room.selectedGame, showBannerAnnouncement, showPowerupAnnouncement, room.players, room.config.roundDuration]);
 
@@ -399,7 +427,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
       const engine = engineRef.current;
       const canvas = canvasRef.current;
       const currentRoom = roomRef.current;
-      const currentRemoteInputs = remoteInputsRef.current;
+      const currentRemoteInputs = propRemoteInputsRef?.current || internalInputsRef.current || p2pHostServer.playerInputs || remoteInputsRef.current || {};
 
       if (engine && canvas && !isPaused) {
         const ctx = canvas.getContext('2d');
@@ -520,25 +548,30 @@ export const HostGameView: React.FC<HostGameViewProps> = ({
             if (Object.keys(allHuds).length > 0) {
               socketClient.broadcastGameState({ hud: allHuds });
               try {
-                import('../multiplayer/P2PHostServer').then(({ p2pHostServer }) => {
-                  if (p2pHostServer.isReady) {
-                    p2pHostServer.broadcast('sync-game-state', { hud: allHuds });
-                  }
-                }).catch(() => {});
+                if (p2pHostServer.isReady) {
+                  p2pHostServer.broadcast('sync-game-state', { hud: allHuds });
+                }
               } catch {}
             }
 
-            // Update HUD leaderboard
+            // Update HUD leaderboard with diff check to avoid unnecessary React re-renders
             const results = engine.getResults?.();
             if (results && results.rankings) {
-              setTopScores(
-                results.rankings.slice(0, 5).map((r: any) => ({
-                  id: r.id,
-                  name: r.name,
-                  score: r.score,
-                  color: r.color,
-                }))
-              );
+              const newTop = results.rankings.slice(0, 5).map((r: any) => ({
+                id: r.id,
+                name: r.name,
+                score: r.score,
+                color: r.color,
+              }));
+              setTopScores((prev) => {
+                if (prev.length !== newTop.length) return newTop;
+                for (let i = 0; i < prev.length; i++) {
+                  if (prev[i].id !== newTop[i].id || prev[i].score !== newTop[i].score) {
+                    return newTop;
+                  }
+                }
+                return prev;
+              });
             }
           }
 

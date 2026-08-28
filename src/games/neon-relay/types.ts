@@ -181,6 +181,12 @@ export interface BotAIState {
   reactionDelayTimer: number;
   steerSmooth: number;
   difficulty?: 'easy' | 'medium' | 'hard';
+  tickCount?: number;
+  cachedTargetX?: number;
+  cachedTargetY?: number;
+  cachedDesiredAngle?: number;
+  cachedAction1?: boolean;
+  cachedAction2?: boolean;
 }
 
 export interface CircuitTrack {

@@ -533,17 +533,15 @@ export class RelicRushEngine {
   // -------------------------------------------------------------------------
 
   private updateBotsAI(dt: number, inputs: Record<string, ControllerInput>): void {
-    const playersList = Array.from(this.players.values());
-
-    // Find current hoard leader
+    // Find current hoard leader (direct loop without array allocation)
     let maxHoard = -1;
     let hoardLeader: PlayerRelicRushState | null = null;
-    playersList.forEach((p) => {
+    for (const p of this.players.values()) {
       if (p.hoardedValue > maxHoard) {
         maxHoard = p.hoardedValue;
         hoardLeader = p;
       }
-    });
+    }
 
     const diff =
       this.config.difficulty === 'easy'
@@ -552,289 +550,264 @@ export class RelicRushEngine {
         ? 'hard'
         : 'medium';
 
-    // Check for active Cosmic Core
-    const activeCosmicCores = Array.from(this.relics.values()).filter(
-      (r) => r.tier === 'cosmic' && r.pickupGraceTimer <= 0
-    );
+    // Find nearest active Cosmic Core without array allocation
+    let activeCosmicCore: RelicEntity | null = null;
+    for (const r of this.relics.values()) {
+      if (r.tier === 'cosmic' && r.pickupGraceTimer <= 0) {
+        activeCosmicCore = r;
+        break;
+      }
+    }
 
-    playersList.forEach((bot) => {
-      if (!bot.isBot || bot.isStunned) return;
+    for (const bot of this.players.values()) {
+      if (!bot.isBot || bot.isStunned) continue;
 
-      let inputX = 0;
-      let inputY = 0;
-      let action1 = false; // Tackle
-      let action2 = false; // Powerup / Kinetic Shield
-
+      const botHash = (bot.id.charCodeAt(bot.id.length - 1) || 0) % 5;
+      bot.aiTickCount = (bot.aiTickCount || botHash) + 1;
       bot.aiDecisionTimer = (bot.aiDecisionTimer || 0) - dt;
-      const archetype = bot.botArchetype || 'collector';
+      const isPerceptionTick = (bot.aiTickCount % 5 === 0) || ((bot.aiDecisionTimer || 0) <= 0) || bot.aiTargetX === undefined;
 
-      // 1. THREAT DETECTION & KINETIC SHIELD TIMING
-      let incomingThreat = false;
-      let framePerfectShieldTrigger = false;
+      if (isPerceptionTick) {
+        bot.aiDecisionTimer = diff === 'easy' ? 0.25 : diff === 'hard' ? 0.02 : 0.10;
+        let action1 = false; // Tackle
+        let action2 = false; // Powerup / Kinetic Shield
 
-      playersList.forEach((other) => {
-        if (other.id === bot.id || other.isStunned) return;
-        const dx = other.x - bot.x;
-        const dy = other.y - bot.y;
-        const d = Math.hypot(dx, dy);
+        // 1. THREAT DETECTION & KINETIC SHIELD TIMING
+        let incomingThreat = false;
+        let framePerfectShieldTrigger = false;
 
-        if (other.isTackling) {
-          // Vector from other to bot
-          const angleToBot = Math.atan2(bot.y - other.y, bot.x - other.x);
-          const tackleHeadingDiff = Math.abs(this.normalizeAngle(other.tackleHeading - angleToBot));
+        for (const other of this.players.values()) {
+          if (other.id === bot.id || other.isStunned) continue;
+          const dx = other.x - bot.x;
+          const dy = other.y - bot.y;
+          const d = Math.hypot(dx, dy);
 
-          // If tackler is heading towards bot
-          if (tackleHeadingDiff < 0.75) {
-            if (diff === 'hard' && d < 240) {
-              // Hard: Perfect kinetic shield timing on incoming tacklers right before impact!
-              framePerfectShieldTrigger = true;
-              incomingThreat = true;
-            } else if (diff === 'medium' && d < 200) {
-              // Medium: Triggers kinetic shield defensively
-              incomingThreat = true;
+          if (other.isTackling) {
+            const angleToBot = Math.atan2(bot.y - other.y, bot.x - other.x);
+            const tackleHeadingDiff = Math.abs(this.normalizeAngle(other.tackleHeading - angleToBot));
+
+            if (tackleHeadingDiff < 0.75) {
+              if (diff === 'hard' && d < 240) {
+                framePerfectShieldTrigger = true;
+                incomingThreat = true;
+              } else if (diff === 'medium' && d < 200) {
+                incomingThreat = true;
+              }
             }
           }
         }
-      });
 
-      // Kinetic Shield Trigger
-      if (framePerfectShieldTrigger || incomingThreat) {
-        if (diff === 'hard') {
-          // Frame-perfect trigger: immediately deploy shield or warp
-          if (bot.shieldCooldown <= 0 || bot.powerupInventory === 'shield' || bot.powerupInventory === 'warp') {
-            action2 = true;
-          }
-        } else if (diff === 'medium') {
-          // Medium defensive shield trigger
-          if (bot.shieldCooldown <= 0 || bot.powerupInventory === 'shield' || bot.powerupInventory === 'warp') {
-            action2 = true;
-          }
-        } else {
-          // Easy: No proactive shield reaction (rare 10% panic only if very close)
-          if (Math.random() < 0.1 && (bot.shieldCooldown <= 0 || bot.powerupInventory === 'shield')) {
-            action2 = true;
+        // Kinetic Shield Trigger
+        if (framePerfectShieldTrigger || incomingThreat) {
+          if (diff === 'hard' || diff === 'medium') {
+            if (bot.shieldCooldown <= 0 || bot.powerupInventory === 'shield' || bot.powerupInventory === 'warp') {
+              action2 = true;
+            }
+          } else {
+            if (Math.random() < 0.1 && (bot.shieldCooldown <= 0 || bot.powerupInventory === 'shield')) {
+              action2 = true;
+            }
           }
         }
-      }
 
-      // 2. TARGET SELECTION (Greed vs Combat vs Cosmic Core)
-      let targetX = this.width / 2;
-      let targetY = this.height / 2;
-      let pursueCombat = false;
-      let isHuntingCosmicCore = false;
+        // 2. TARGET SELECTION
+        let targetX = this.width / 2;
+        let targetY = this.height / 2;
+        let pursueCombat = false;
+        let isHuntingCosmicCore = false;
 
-      // HARD DIFFICULTY: Priority hunting of Cosmic Cores!
-      if (diff === 'hard' && activeCosmicCores.length > 0) {
-        // Drop other priorities and hunt cosmic core immediately
-        let nearestCosmic: RelicEntity | null = null;
-        let minCosmicDist = Infinity;
-        activeCosmicCores.forEach((cc) => {
-          const d = Math.hypot(cc.x - bot.x, cc.y - bot.y);
-          if (d < minCosmicDist) {
-            minCosmicDist = d;
-            nearestCosmic = cc;
-          }
-        });
-
-        if (nearestCosmic) {
+        if (diff === 'hard' && activeCosmicCore) {
           isHuntingCosmicCore = true;
-          const cosmicTarget: RelicEntity = nearestCosmic;
-          targetX = cosmicTarget.x;
-          targetY = cosmicTarget.y;
-
-          // Tackle dash towards cosmic core to beat rivals or clear distance
+          targetX = activeCosmicCore.x;
+          targetY = activeCosmicCore.y;
+          const minCosmicDist = Math.hypot(activeCosmicCore.x - bot.x, activeCosmicCore.y - bot.y);
           if (bot.tackleCooldown <= 0 && minCosmicDist > 180 && minCosmicDist < 450) {
             action1 = true;
           }
         }
-      }
 
-      // COMBAT HUNTING & TACKLE INTERCEPTIONS
-      if (!isHuntingCosmicCore) {
-        let bestCombatTarget: PlayerRelicRushState | null = null;
-        let bestCombatScore = -Infinity;
+        // COMBAT HUNTING & TACKLE INTERCEPTIONS
+        if (!isHuntingCosmicCore) {
+          let bestCombatTarget: PlayerRelicRushState | null = null;
+          let bestCombatScore = -Infinity;
 
-        playersList.forEach((other) => {
-          if (other.id === bot.id || other.isStunned || other.isShieldActive) return;
-          const dist = Math.hypot(other.x - bot.x, other.y - bot.y);
-          const gemsHeld = other.relicsCollectedCount;
-          const hoardVal = other.hoardedValue;
+          for (const other of this.players.values()) {
+            if (other.id === bot.id || other.isStunned || other.isShieldActive) continue;
+            const dist = Math.hypot(other.x - bot.x, other.y - bot.y);
+            const gemsHeld = other.relicsCollectedCount;
+            const hoardVal = other.hoardedValue;
 
-          if (diff === 'hard') {
-            // Hard: Aggressive tackle interceptions against players with relics or high score
-            if (hoardVal >= 20 || gemsHeld >= 3 || other.id === hoardLeader?.id) {
-              const score = (hoardVal * 2 + gemsHeld * 15) / (dist + 40);
-              if (score > bestCombatScore && dist < 750) {
-                bestCombatScore = score;
-                bestCombatTarget = other;
+            if (diff === 'hard') {
+              if (hoardVal >= 20 || gemsHeld >= 3 || other.id === hoardLeader?.id) {
+                const score = (hoardVal * 2 + gemsHeld * 15) / (dist + 40);
+                if (score > bestCombatScore && dist < 750) {
+                  bestCombatScore = score;
+                  bestCombatTarget = other;
+                }
               }
-            }
-          } else if (diff === 'medium') {
-            // Medium: Tackles players holding >5 gems (or >= 50 hoard value)
-            if (gemsHeld > 5 || hoardVal >= 50 || (hoardLeader && other.id === hoardLeader.id && hoardVal >= 40)) {
-              const score = (hoardVal + gemsHeld * 10) / (dist + 50);
-              if (score > bestCombatScore && dist < 550) {
-                bestCombatScore = score;
-                bestCombatTarget = other;
+            } else if (diff === 'medium') {
+              if (gemsHeld > 5 || hoardVal >= 50 || (hoardLeader && other.id === hoardLeader.id && hoardVal >= 40)) {
+                const score = (hoardVal + gemsHeld * 10) / (dist + 50);
+                if (score > bestCombatScore && dist < 550) {
+                  bestCombatScore = score;
+                  bestCombatTarget = other;
+                }
               }
-            }
-          } else {
-            // Easy: Rarely tackles (only 10% chance and if extremely close)
-            if (hoardVal >= 60 && dist < 160) {
-              if (Math.random() < 0.10) {
+            } else {
+              if (hoardVal >= 60 && dist < 160 && Math.random() < 0.10) {
                 bestCombatTarget = other;
               }
             }
           }
-        });
 
-        if (bestCombatTarget) {
-          pursueCombat = true;
-          const rival: PlayerRelicRushState = bestCombatTarget;
-          const dRival = Math.hypot(rival.x - bot.x, rival.y - bot.y);
+          if (bestCombatTarget) {
+            pursueCombat = true;
+            const rival: PlayerRelicRushState = bestCombatTarget;
+            const dRival = Math.hypot(rival.x - bot.x, rival.y - bot.y);
 
-          if (diff === 'hard') {
-            // Hard: Aggressive predictive tackle interception (leads target vector)
-            const leadFactor = Math.min(0.45, dRival / (bot.maxSpeed * 1.6));
-            targetX = rival.x + rival.vx * leadFactor;
-            targetY = rival.y + rival.vy * leadFactor;
+            if (diff === 'hard') {
+              const leadFactor = Math.min(0.45, dRival / (bot.maxSpeed * 1.6));
+              targetX = rival.x + rival.vx * leadFactor;
+              targetY = rival.y + rival.vy * leadFactor;
 
-            // Trigger tackle with precision angle alignment
-            if (bot.tackleCooldown <= 0 && dRival < 320) {
-              const angleToIntercept = Math.atan2(targetY - bot.y, targetX - bot.x);
-              const angleDiff = Math.abs(this.normalizeAngle(bot.angle - angleToIntercept));
-              if (angleDiff < 0.85) {
+              if (bot.tackleCooldown <= 0 && dRival < 320) {
+                const angleToIntercept = Math.atan2(targetY - bot.y, targetX - bot.x);
+                const angleDiff = Math.abs(this.normalizeAngle(bot.angle - angleToIntercept));
+                if (angleDiff < 0.85) {
+                  action1 = true;
+                }
+              }
+            } else if (diff === 'medium') {
+              const leadFactor = 0.2;
+              targetX = rival.x + rival.vx * leadFactor;
+              targetY = rival.y + rival.vy * leadFactor;
+
+              if (bot.tackleCooldown <= 0 && dRival < 240) {
+                const angleToRival = Math.atan2(rival.y - bot.y, rival.x - bot.x);
+                const angleDiff = Math.abs(this.normalizeAngle(bot.angle - angleToRival));
+                if (angleDiff < 0.65) {
+                  action1 = true;
+                }
+              }
+            } else {
+              targetX = rival.x;
+              targetY = rival.y;
+              if (bot.tackleCooldown <= 0 && dRival < 140 && Math.random() < 0.10) {
                 action1 = true;
               }
             }
-          } else if (diff === 'medium') {
-            // Medium: Standard combat chase and tackle
-            const leadFactor = 0.2;
-            targetX = rival.x + rival.vx * leadFactor;
-            targetY = rival.y + rival.vy * leadFactor;
+          }
+        }
 
-            if (bot.tackleCooldown <= 0 && dRival < 240) {
-              const angleToRival = Math.atan2(rival.y - bot.y, rival.x - bot.x);
-              const angleDiff = Math.abs(this.normalizeAngle(bot.angle - angleToRival));
-              if (angleDiff < 0.65) {
+        // RELIC SCAVENGING
+        if (!isHuntingCosmicCore && !pursueCombat) {
+          let bestScore = -Infinity;
+          let bestRelic: RelicEntity | null = null;
+
+          for (const relic of this.relics.values()) {
+            if (relic.pickupGraceTimer > 0) continue;
+            const dx = relic.x - bot.x;
+            const dy = relic.y - bot.y;
+            const dist = Math.hypot(dx, dy);
+
+            let valueWeight = relic.value;
+
+            if (diff === 'easy') {
+              if (relic.tier === 'diamond' || relic.tier === 'cosmic') {
+                if (dist > 220) continue;
+                valueWeight *= 0.3;
+              }
+              const score = valueWeight / (dist * dist + 50);
+              if (score > bestScore) {
+                bestScore = score;
+                bestRelic = relic;
+              }
+            } else if (diff === 'medium') {
+              if (relic.tier === 'cosmic') valueWeight *= 3.5;
+              if (relic.tier === 'diamond') valueWeight *= 2.2;
+              if (relic.tier === 'silver') valueWeight *= 1.4;
+              if (relic.tier === 'powerup') valueWeight = 55;
+
+              const score = valueWeight / (dist + 35);
+              if (score > bestScore) {
+                bestScore = score;
+                bestRelic = relic;
+              }
+            } else {
+              if (relic.tier === 'cosmic') valueWeight *= 6.0;
+              if (relic.tier === 'diamond') valueWeight *= 3.0;
+              if (relic.tier === 'silver') valueWeight *= 1.6;
+              if (relic.tier === 'powerup') valueWeight = 70;
+
+              const score = valueWeight / (dist + 25);
+              if (score > bestScore) {
+                bestScore = score;
+                bestRelic = relic;
+              }
+            }
+          }
+
+          if (bestRelic) {
+            targetX = bestRelic.x;
+            targetY = bestRelic.y;
+
+            if (diff === 'hard' && bestRelic.value >= 50 && bot.tackleCooldown <= 0) {
+              const d = Math.hypot(bestRelic.x - bot.x, bestRelic.y - bot.y);
+              if (d > 200 && d < 450) {
                 action1 = true;
               }
             }
-          } else {
-            // Easy: rarely tackles (10%)
-            targetX = rival.x;
-            targetY = rival.y;
-            if (bot.tackleCooldown <= 0 && dRival < 140 && Math.random() < 0.10) {
-              action1 = true;
-            }
+          }
+
+          if (bot.powerupInventory === 'magnet' && bot.magnetTimer <= 0) {
+            action2 = true;
           }
         }
+
+        // 3. HAZARD PIT AVOIDANCE
+        for (let h = 0; h < this.hazardPits.length; h++) {
+          const pit = this.hazardPits[h];
+          const dx = bot.x - pit.x;
+          const dy = bot.y - pit.y;
+          const d = Math.hypot(dx, dy);
+          const dangerRadius = pit.radius + (diff === 'easy' ? 40 : 65);
+          if (d < dangerRadius && d > 0) {
+            const repelStrength = (dangerRadius - d) / dangerRadius;
+            targetX += (dx / d) * repelStrength * (diff === 'easy' ? 220 : 380);
+            targetY += (dy / d) * repelStrength * (diff === 'easy' ? 220 : 380);
+          }
+        }
+
+        bot.aiTargetX = targetX;
+        bot.aiTargetY = targetY;
+        bot.cachedAction1 = action1;
+        bot.cachedAction2 = action2;
       }
 
-      // RELIC SCAVENGING
-      if (!isHuntingCosmicCore && !pursueCombat) {
-        let bestScore = -Infinity;
-        let bestRelic: RelicEntity | null = null;
-
-        this.relics.forEach((relic) => {
-          if (relic.pickupGraceTimer > 0) return;
-          const dx = relic.x - bot.x;
-          const dy = relic.y - bot.y;
-          const dist = Math.hypot(dx, dy);
-
-          let valueWeight = relic.value;
-
-          if (diff === 'easy') {
-            // Easy: Collects nearby gems, slow reaction to diamond cores (penalized unless very close)
-            if (relic.tier === 'diamond' || relic.tier === 'cosmic') {
-              if (dist > 220) return; // Ignores far diamond/cosmic cores
-              valueWeight *= 0.3; // Low valuation compared to easy nearby gems
-            }
-            const score = valueWeight / (dist * dist + 50);
-            if (score > bestScore) {
-              bestScore = score;
-              bestRelic = relic;
-            }
-          } else if (diff === 'medium') {
-            // Medium: Targets high-value relics
-            if (relic.tier === 'cosmic') valueWeight *= 3.5;
-            if (relic.tier === 'diamond') valueWeight *= 2.2;
-            if (relic.tier === 'silver') valueWeight *= 1.4;
-            if (relic.tier === 'powerup') valueWeight = 55;
-
-            const score = valueWeight / (dist + 35);
-            if (score > bestScore) {
-              bestScore = score;
-              bestRelic = relic;
-            }
-          } else {
-            // Hard: Optimal heuristic weighting & priority cosmic hunting
-            if (relic.tier === 'cosmic') valueWeight *= 6.0;
-            if (relic.tier === 'diamond') valueWeight *= 3.0;
-            if (relic.tier === 'silver') valueWeight *= 1.6;
-            if (relic.tier === 'powerup') valueWeight = 70;
-
-            const score = valueWeight / (dist + 25);
-            if (score > bestScore) {
-              bestScore = score;
-              bestRelic = relic;
-            }
-          }
-        });
-
-        if (bestRelic) {
-          const targetRelic: RelicEntity = bestRelic;
-          targetX = targetRelic.x;
-          targetY = targetRelic.y;
-
-          if (diff === 'hard' && targetRelic.value >= 50 && bot.tackleCooldown <= 0) {
-            const d = Math.hypot(targetRelic.x - bot.x, targetRelic.y - bot.y);
-            if (d > 200 && d < 450) {
-              action1 = true;
-            }
-          }
-        }
-
-        // Magnet powerup deployment
-        if (bot.powerupInventory === 'magnet' && bot.magnetTimer <= 0) {
-          action2 = true;
-        }
-      }
-
-      // 3. HAZARD PIT AVOIDANCE
-      this.hazardPits.forEach((pit) => {
-        const dx = bot.x - pit.x;
-        const dy = bot.y - pit.y;
-        const d = Math.hypot(dx, dy);
-        const dangerRadius = pit.radius + (diff === 'easy' ? 40 : 65);
-        if (d < dangerRadius && d > 0) {
-          const repelStrength = (dangerRadius - d) / dangerRadius;
-          targetX += (dx / d) * repelStrength * (diff === 'easy' ? 220 : 380);
-          targetY += (dy / d) * repelStrength * (diff === 'easy' ? 220 : 380);
-        }
-      });
-
-      // Directional steering vector
-      const toTargetX = targetX - bot.x;
-      const toTargetY = targetY - bot.y;
+      // Directional steering vector with smooth calculation
+      const tx = bot.aiTargetX ?? bot.x;
+      const ty = bot.aiTargetY ?? bot.y;
+      const toTargetX = tx - bot.x;
+      const toTargetY = ty - bot.y;
       const targetDist = Math.hypot(toTargetX, toTargetY);
 
+      let inputX = 0;
+      let inputY = 0;
       if (targetDist > 10) {
         inputX = toTargetX / targetDist;
         inputY = toTargetY / targetDist;
       }
 
-      // Feed into synthetic input record
       inputs[bot.id] = {
         x: Math.max(-1, Math.min(1, inputX)),
         y: Math.max(-1, Math.min(1, inputY)),
         angle: Math.atan2(inputY, inputX),
         magnitude: Math.min(1, targetDist / 50),
-        action1,
-        action2,
+        action1: !!bot.cachedAction1,
+        action2: !!bot.cachedAction2,
         timestamp: Date.now(),
       };
-    });
+    }
   }
 
   // -------------------------------------------------------------------------

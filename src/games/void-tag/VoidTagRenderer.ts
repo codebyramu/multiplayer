@@ -293,12 +293,9 @@ export class VoidTagRenderer {
       const endAngle = startAngle + energyPercent * Math.PI * 2;
       ctx.strokeStyle = primaryColor;
       ctx.lineWidth = 5;
-      ctx.shadowColor = primaryColor;
-      ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(sanc.x, sanc.y, sanc.radius - 5, startAngle, endAngle);
       ctx.stroke();
-      ctx.shadowBlur = 0;
 
       // Central Light Beacon Core
       const beaconRadius = 16 + Math.sin(this.animTimer * 3 + sanc.id) * 3;
@@ -344,8 +341,6 @@ export class VoidTagRenderer {
       const pulse = 0.5 + 0.5 * Math.sin(this.animTimer * 6);
       ctx.strokeStyle = `rgba(0, 245, 160, ${0.4 + pulse * 0.3})`;
       ctx.lineWidth = 3;
-      ctx.shadowColor = '#00F5A0';
-      ctx.shadowBlur = 15;
 
       // Draw forcefield dome perimeter
       ctx.beginPath();
@@ -403,13 +398,10 @@ export class VoidTagRenderer {
       ctx.closePath();
       ctx.fill();
 
-      // Glowing Neon Rim
+      // Neon Rim
       ctx.strokeStyle = deb.glowColor;
       ctx.lineWidth = 2;
-      ctx.shadowColor = deb.glowColor;
-      ctx.shadowBlur = 6;
       ctx.stroke();
-      ctx.shadowBlur = 0;
 
       // Inner metallic core highlight
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
@@ -514,8 +506,6 @@ export class VoidTagRenderer {
 
       ctx.strokeStyle = i % 2 === 0 ? '#9D4EDD' : '#FF007F';
       ctx.lineWidth = 3.5;
-      ctx.shadowColor = '#FF0055';
-      ctx.shadowBlur = 8;
 
       ctx.beginPath();
       ctx.moveTo(Math.cos(baseAngle) * hunter.radius * 0.8, Math.sin(baseAngle) * hunter.radius * 0.8);
@@ -532,13 +522,12 @@ export class VoidTagRenderer {
       ctx.quadraticCurveTo(midX, midY, tipX, tipY);
       ctx.stroke();
 
-      // Glowing tip node
+      // Tip node
       ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
       ctx.arc(tipX, tipY, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.shadowBlur = 0;
 
     // 3. Central Dark Core Chassis
     ctx.rotate(hunter.angle);
@@ -546,8 +535,6 @@ export class VoidTagRenderer {
     ctx.fillStyle = '#0E0416';
     ctx.strokeStyle = '#FF3366';
     ctx.lineWidth = 2.5;
-    ctx.shadowColor = '#FF3366';
-    ctx.shadowBlur = 12;
 
     // Menacing Spiked Hull
     ctx.beginPath();
@@ -558,16 +545,12 @@ export class VoidTagRenderer {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // 4. Glowing Crimson Void Eye
     ctx.fillStyle = '#FF0055';
-    ctx.shadowColor = '#FF0055';
-    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.arc(hunter.radius * 0.2, 0, 4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
 
     ctx.restore();
   }
@@ -604,8 +587,6 @@ export class VoidTagRenderer {
     ctx.fillStyle = '#0F172A';
     ctx.strokeStyle = shipColor;
     ctx.lineWidth = 2.5;
-    ctx.shadowColor = shipColor;
-    ctx.shadowBlur = 10;
 
     ctx.beginPath();
     ctx.moveTo(survivor.radius + 4, 0);
@@ -615,7 +596,6 @@ export class VoidTagRenderer {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // 3. Cockpit Canopy / Energy Core
     ctx.fillStyle = isLocal ? '#00F5A0' : '#FFFFFF';
@@ -671,8 +651,6 @@ export class VoidTagRenderer {
     // Crackling EMP Lightning Sparks
     ctx.strokeStyle = '#00E5FF';
     ctx.lineWidth = 2;
-    ctx.shadowColor = '#00E5FF';
-    ctx.shadowBlur = 8;
 
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + (Math.random() * 0.4);
@@ -729,8 +707,6 @@ export class VoidTagRenderer {
       const d = Math.hypot(p.x - centerX, p.y - centerY);
       if (Math.abs(d - radius) < 35) {
         ctx.fillStyle = p.isHunter ? '#FF0055' : '#00F5A0';
-        ctx.shadowColor = ctx.fillStyle;
-        ctx.shadowBlur = 12;
         ctx.beginPath();
         ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
         ctx.fill();
@@ -749,9 +725,8 @@ export class VoidTagRenderer {
       const alpha = progress * 0.8;
 
       ctx.strokeStyle = sw.color;
+      ctx.globalAlpha = alpha;
       ctx.lineWidth = 4 * progress + 1;
-      ctx.shadowColor = sw.color;
-      ctx.shadowBlur = 14;
 
       ctx.beginPath();
       ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
@@ -780,11 +755,6 @@ export class VoidTagRenderer {
       ctx.fillStyle = pt.color;
       ctx.globalAlpha = Math.max(0, Math.min(1, pt.alpha));
 
-      if (pt.type === 'void_wisp' || pt.type === 'corruption') {
-        ctx.shadowColor = pt.color;
-        ctx.shadowBlur = 8;
-      }
-
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
       ctx.fill();
@@ -806,8 +776,6 @@ export class VoidTagRenderer {
 
     ctx.strokeStyle = borderColor;
     ctx.lineWidth = 3;
-    ctx.shadowColor = borderColor;
-    ctx.shadowBlur = 12;
 
     ctx.strokeRect(0, 0, width, height);
 
@@ -851,11 +819,15 @@ export class VoidTagRenderer {
     for (const t of texts) {
       const alpha = t.life / t.maxLife;
       ctx.font = `bold ${t.fontSize}px "Courier New", monospace`;
-      ctx.fillStyle = t.color;
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.textAlign = 'center';
-      ctx.shadowColor = t.color;
-      ctx.shadowBlur = 10;
+
+      // Outline pass
+      ctx.strokeStyle = '#06070B';
+      ctx.lineWidth = 3;
+      ctx.strokeText(t.text, t.x, t.y);
+
+      ctx.fillStyle = t.color;
       ctx.fillText(t.text, t.x, t.y);
     }
     ctx.restore();
@@ -881,10 +853,13 @@ export class VoidTagRenderer {
 
     if (flash.text) {
       ctx.font = '900 42px "Courier New", monospace';
-      ctx.fillStyle = '#FF0055';
       ctx.textAlign = 'center';
-      ctx.shadowColor = '#FF0055';
-      ctx.shadowBlur = 25;
+
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 6;
+      ctx.strokeText(flash.text, width * 0.5, height * 0.45);
+
+      ctx.fillStyle = '#FF0055';
       ctx.fillText(flash.text, width * 0.5, height * 0.45);
     }
     ctx.restore();
@@ -913,7 +888,6 @@ export class VoidTagRenderer {
       const isOffscreen = screenX < margin || screenX > viewW - margin || screenY < margin || screenY > viewH - margin;
 
       if (isOffscreen) {
-        // Compute clamped edge position
         const clampedX = Math.max(margin, Math.min(viewW - margin, screenX));
         const clampedY = Math.max(margin, Math.min(viewH - margin, screenY));
 
@@ -924,8 +898,6 @@ export class VoidTagRenderer {
         ctx.rotate(angle);
 
         ctx.fillStyle = p.isHunter ? '#FF0055' : '#00F5A0';
-        ctx.shadowColor = ctx.fillStyle;
-        ctx.shadowBlur = 8;
 
         // Draw pointer arrow
         ctx.beginPath();
@@ -962,13 +934,10 @@ export class VoidTagRenderer {
     ctx.fillStyle = 'rgba(6, 7, 11, 0.85)';
     ctx.strokeStyle = '#9D4EDD';
     ctx.lineWidth = 2.5;
-    ctx.shadowColor = '#9D4EDD';
-    ctx.shadowBlur = 18;
     ctx.beginPath();
     ctx.roundRect(cx - 220, cy - 80, 440, 160, 16);
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // Outer pulsating energy ring
     ctx.strokeStyle = 'rgba(157, 78, 221, 0.5)';
@@ -983,13 +952,10 @@ export class VoidTagRenderer {
     ctx.textAlign = 'center';
     ctx.fillText('VOID HUNTER AWAKENS IN', cx, cy - 45);
 
-    // Big Glowing Countdown Digit
+    // Big Countdown Digit
     ctx.font = `900 ${Math.floor(48 * pulseScale)}px "Courier New", monospace`;
     ctx.fillStyle = countNumber === 1 ? '#FF0055' : countNumber === 2 ? '#FFB224' : '#00F5A0';
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = 20;
     ctx.fillText(`${countNumber}`, cx, cy + 12);
-    ctx.shadowBlur = 0;
 
     // Subtext instruction
     ctx.font = 'bold 12px "Courier New", monospace';

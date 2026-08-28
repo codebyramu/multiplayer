@@ -175,6 +175,12 @@ export interface SerpentPlayerEntity {
   difficulty?: 'easy' | 'medium' | 'hard';
   hyperBoostTimer: number; // 5-second automatic free hyper boost
   ghostHuntTimer: number;  // 10-second ethereal pass-through and wall bounce immunity
+
+  // Spatial Broadphase Bounding Box
+  minX?: number;
+  maxX?: number;
+  minY?: number;
+  maxY?: number;
 }
 
 export interface SerpentArenaConfig {

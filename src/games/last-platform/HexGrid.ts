@@ -3,6 +3,7 @@ import { PlatformTileData, TileState, Point2D, HexCoord, LastPlatformConfig } fr
 export class HexGrid {
   public tiles: Map<number, PlatformTileData> = new Map();
   public tilesList: PlatformTileData[] = [];
+  public axialMap: Map<string, PlatformTileData> = new Map();
   public config: LastPlatformConfig;
   public arenaRadius: number; // Max arena radius in px
   public currentDangerRadius: number; // Shrinking storm radius
@@ -24,6 +25,7 @@ export class HexGrid {
   public generateGrid(): void {
     this.tiles.clear();
     this.tilesList = [];
+    this.axialMap.clear();
     this.movingTiles = [];
     let idCounter = 1;
 
@@ -71,6 +73,7 @@ export class HexGrid {
 
         this.tiles.set(tile.id, tile);
         this.tilesList.push(tile);
+        this.axialMap.set(`${q},${r}`, tile);
       }
     }
 
@@ -281,38 +284,78 @@ export class HexGrid {
   }
 
   /**
-   * Precision Point-In-Hexagon test.
+   * Precision Point-In-Hexagon test with fast O(1) axial coordinate math.
    * Returns the tile at given world (x,y) only if valid and NOT collapsed / respawning.
    */
   public getTileAt(x: number, y: number): PlatformTileData | null {
-    let closestTile: PlatformTileData | null = null;
-    let closestDistSq = Infinity;
-
-    for (const tile of this.tilesList) {
-      // Collapsed or respawning tiles are abyss - players cannot stand on them!
-      if (tile.state === 'collapsed' || tile.state === 'respawning') continue;
-
-      const dx = x - tile.worldX;
-      const dy = y - tile.worldY;
-      const distSq = dx * dx + dy * dy;
-
-      // Hex radius bounding check
-      const boundRadius = tile.size * 1.05;
-      if (distSq <= boundRadius * boundRadius) {
-        if (this.isPointInsideHex(dx, dy, tile.size)) {
-          return tile;
+    // 1. Check moving platforms first (only a few tiles)
+    for (let i = 0; i < this.movingTiles.length; i++) {
+      const mt = this.movingTiles[i];
+      if (mt.state === 'collapsed' || mt.state === 'respawning') continue;
+      const dx = x - mt.worldX;
+      const dy = y - mt.worldY;
+      if (dx * dx + dy * dy <= (mt.size * 1.05) ** 2) {
+        if (this.isPointInsideHex(dx, dy, mt.size)) {
+          return mt;
         }
-      }
-
-      if (distSq < closestDistSq) {
-        closestDistSq = distSq;
-        closestTile = tile;
       }
     }
 
-    // Fallback: If very close to center of a non-collapsed, non-respawning tile
-    if (closestTile && closestTile.state !== 'collapsed' && closestTile.state !== 'respawning' && closestDistSq <= (closestTile.size * 0.9) ** 2) {
-      return closestTile;
+    // 2. Fast O(1) Pointy-Topped Hex Axial coordinate conversion
+    const size = this.config.tileSize;
+    const q = ((Math.sqrt(3) / 3) * x - (1 / 3) * y) / size;
+    const r = ((2 / 3) * y) / size;
+    const s = -q - r;
+
+    let rq = Math.round(q);
+    let rr = Math.round(r);
+    let rs = Math.round(s);
+
+    const qDiff = Math.abs(rq - q);
+    const rDiff = Math.abs(rr - r);
+    const sDiff = Math.abs(rs - s);
+
+    if (qDiff > rDiff && qDiff > sDiff) {
+      rq = -rr - rs;
+    } else if (rDiff > sDiff) {
+      rr = -rq - rs;
+    }
+
+    // Direct axial lookup
+    const directTile = this.axialMap.get(`${rq},${rr}`);
+    if (directTile && directTile.state !== 'collapsed' && directTile.state !== 'respawning') {
+      const dx = x - directTile.worldX;
+      const dy = y - directTile.worldY;
+      if (this.isPointInsideHex(dx, dy, directTile.size)) {
+        return directTile;
+      }
+    }
+
+    // Check immediate 6 axial neighbors in case the query point is on a boundary/edge
+    const neighbors = [
+      [rq + 1, rr], [rq - 1, rr],
+      [rq, rr + 1], [rq, rr - 1],
+      [rq + 1, rr - 1], [rq - 1, rr + 1]
+    ];
+
+    for (let i = 0; i < 6; i++) {
+      const [nq, nr] = neighbors[i];
+      const nTile = this.axialMap.get(`${nq},${nr}`);
+      if (nTile && nTile.state !== 'collapsed' && nTile.state !== 'respawning') {
+        const dx = x - nTile.worldX;
+        const dy = y - nTile.worldY;
+        if (this.isPointInsideHex(dx, dy, nTile.size)) {
+          return nTile;
+        }
+      }
+    }
+
+    if (directTile && directTile.state !== 'collapsed' && directTile.state !== 'respawning') {
+      const dx = x - directTile.worldX;
+      const dy = y - directTile.worldY;
+      if (dx * dx + dy * dy <= (directTile.size * 0.9) ** 2) {
+        return directTile;
+      }
     }
 
     return null;

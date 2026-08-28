@@ -9,6 +9,70 @@ export interface PlayerInputTelemetry {
   currentRateHz: number;
 }
 
+export function encodeBinaryInput(input: ControllerInput): ArrayBuffer {
+  const buffer = new ArrayBuffer(16);
+  const f32 = new Float32Array(buffer);
+  f32[0] = input.x;
+  f32[1] = input.y;
+  let btnMask = 0;
+  if (input.action1) btnMask |= 1;
+  if (input.action2) btnMask |= 2;
+  if (input.action3) btnMask |= 4;
+  f32[2] = btnMask;
+  f32[3] = (input.timestamp || Date.now()) % 100000000;
+  return buffer;
+}
+
+export function decodeBinaryInput(raw: any): ControllerInput | null {
+  if (!raw) return null;
+  if (raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
+    const byteOffset = 'byteOffset' in raw ? (raw as ArrayBufferView).byteOffset : 0;
+    const byteLength = 'byteLength' in raw ? (raw as ArrayBufferView).byteLength : (raw as ArrayBuffer).byteLength;
+    const buffer = 'buffer' in raw ? (raw as ArrayBufferView).buffer : (raw as ArrayBuffer);
+    if (byteLength >= 12) {
+      const f32 = new Float32Array(buffer, byteOffset, Math.min(4, Math.floor(byteLength / 4)));
+      const x = Math.max(-1.0, Math.min(1.0, Number(f32[0]) || 0));
+      const y = Math.max(-1.0, Math.min(1.0, Number(f32[1]) || 0));
+      const btnMask = Math.round(Number(f32[2]) || 0);
+      const action1 = (btnMask & 1) !== 0;
+      const action2 = (btnMask & 2) !== 0;
+      const action3 = (btnMask & 4) !== 0;
+      const mag = Math.min(1.0, Math.hypot(x, y));
+      const angle = ((Math.atan2(y, x) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      return {
+        x,
+        y,
+        magnitude: mag,
+        angle,
+        action1,
+        action2,
+        action3,
+        timestamp: Date.now(),
+      };
+    }
+  } else if (Array.isArray(raw) && raw.length >= 3) {
+    const x = Math.max(-1.0, Math.min(1.0, Number(raw[0]) || 0));
+    const y = Math.max(-1.0, Math.min(1.0, Number(raw[1]) || 0));
+    const btnMask = Number(raw[2]) || 0;
+    const action1 = (btnMask & 1) !== 0;
+    const action2 = (btnMask & 2) !== 0;
+    const action3 = (btnMask & 4) !== 0;
+    const mag = Math.min(1.0, Math.hypot(x, y));
+    const angle = ((Math.atan2(y, x) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    return {
+      x,
+      y,
+      magnitude: mag,
+      angle,
+      action1,
+      action2,
+      action3,
+      timestamp: Number(raw[3]) || Date.now(),
+    };
+  }
+  return null;
+}
+
 export class InputSanitizer {
   // 200Hz max rate corresponds to minimum inter-packet interval of 5.0ms (allowing small jitter down to 4.5ms)
   private static readonly MAX_FREQUENCY_HZ = 200;
@@ -28,6 +92,16 @@ export class InputSanitizer {
     const now = performance.now();
     const stats = this.getOrCreateTelemetry(playerId);
     stats.packetsReceived++;
+
+    // Check if input is in binary or compact array format
+    if (rawInput instanceof ArrayBuffer || ArrayBuffer.isView(rawInput) || Array.isArray(rawInput)) {
+      const decoded = decodeBinaryInput(rawInput);
+      if (!decoded) {
+        stats.packetsDroppedMalformed++;
+        return null;
+      }
+      rawInput = decoded;
+    }
 
     // 1. RATE LIMITER: 200Hz maximum check
     const lastTime = this.playerTimestamps.get(playerId) || 0;

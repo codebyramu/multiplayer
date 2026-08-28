@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { soundManager } from '../../audio/SoundManager';
 
@@ -13,18 +13,23 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
 }) => {
   const [count, setCount] = useState<number>(durationSeconds);
   const [isGo, setIsGo] = useState<boolean>(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     soundManager.playCountdownBeep(false);
 
-    const interval = setInterval(() => {
+    let completeTimeout: number | undefined;
+    const interval = window.setInterval(() => {
       setCount((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
           setIsGo(true);
           soundManager.playCountdownBeep(true);
-          setTimeout(() => {
-            onComplete();
+          completeTimeout = window.setTimeout(() => {
+            if (onCompleteRef.current) {
+              onCompleteRef.current();
+            }
           }, 800);
           return 0;
         }
@@ -33,11 +38,19 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
       });
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [durationSeconds, onComplete]);
+    return () => {
+      clearInterval(interval);
+      if (completeTimeout) {
+        clearTimeout(completeTimeout);
+      }
+    };
+  }, [durationSeconds]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-lg select-none">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-lg select-none"
+      style={{ willChange: 'opacity', transform: 'translateZ(0)' }}
+    >
       {/* Background Radial Atmosphere Glow */}
       <div className={`absolute w-[600px] h-[600px] rounded-full blur-[140px] transition-colors duration-500 pointer-events-none ${
         isGo ? 'bg-arcade-mint/30' : 'bg-arcade-amber/25'
@@ -52,6 +65,7 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
             exit={{ scale: 0.3, opacity: 0, filter: 'blur(10px)' }}
             transition={{ type: 'spring', stiffness: 450, damping: 22 }}
             className="flex flex-col items-center justify-center text-center z-10"
+            style={{ willChange: 'transform, opacity' }}
           >
             <div className="relative flex items-center justify-center">
               <span className="font-arcade text-[10rem] sm:text-[13rem] md:text-[16rem] font-black text-arcade-amber leading-none drop-shadow-[0_0_60px_rgba(255,178,36,0.9)] select-none">
@@ -72,6 +86,7 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
             exit={{ scale: 2.5, opacity: 0 }}
             transition={{ duration: 0.7, ease: 'easeOut' }}
             className="flex flex-col items-center justify-center text-center z-10"
+            style={{ willChange: 'transform, opacity' }}
           >
             <span className="font-arcade text-[8rem] sm:text-[11rem] md:text-[14rem] font-black text-arcade-mint leading-none drop-shadow-[0_0_80px_rgba(0,245,160,1)] select-none">
               LAUNCH!

@@ -135,6 +135,7 @@ export interface ShadowOutrunPlayer {
   aiTargetPlayerId?: string;
   aiState?: 'patrol' | 'hunt' | 'flee' | 'scavenge' | 'flank';
   aiDecisionTimer?: number;
+  aiTickCount?: number;
   aiStuckTimer?: number;
   lastX?: number;
   lastY?: number;

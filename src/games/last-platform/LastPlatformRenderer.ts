@@ -106,10 +106,13 @@ export class LastPlatformRenderer {
       ctx.save();
       ctx.translate(proj.x, proj.y);
 
-      // Electric bolt plasma glow
+      // Electric bolt plasma glow (outer halo, 0 shadowBlur)
+      ctx.fillStyle = 'rgba(0, 229, 255, 0.35)';
+      ctx.beginPath();
+      ctx.arc(0, 0, proj.radius * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = '#00E5FF';
-      ctx.shadowColor = '#00E5FF';
-      ctx.shadowBlur = 18;
       ctx.beginPath();
       ctx.arc(0, 0, proj.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -227,11 +230,9 @@ export class LastPlatformRenderer {
     ctx.arc(0, 0, r, 0, Math.PI * 2, true);
     ctx.fill();
 
-    // Danger perimeter border line
+    // Danger perimeter border line (0 shadowBlur)
     ctx.strokeStyle = color;
     ctx.lineWidth = isSuddenDeath ? 3.5 : 2.5;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = isSuddenDeath ? 20 : 12;
     ctx.setLineDash([12, 8]);
     ctx.lineDashOffset = -time * 24;
 
@@ -249,8 +250,6 @@ export class LastPlatformRenderer {
       ctx.save();
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 2.0;
-      ctx.shadowColor = '#FF3366';
-      ctx.shadowBlur = 16;
 
       for (let i = 0; i < arcCount; i++) {
         const baseAngle = (i / arcCount) * Math.PI * 2 + (lightningTime * 0.4);
@@ -271,7 +270,6 @@ export class LastPlatformRenderer {
       ctx.restore();
     }
 
-    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
@@ -298,140 +296,67 @@ export class LastPlatformRenderer {
    */
   private renderSingleTile(ctx: CanvasRenderingContext2D, tile: PlatformTileData): void {
     ctx.save();
-
-    // Falling / Shake translation
-    let drawX = tile.worldX;
-    let drawY = tile.worldY;
-    let drawZ = 0;
-    let alpha = 1.0;
-    let scale = 1.0;
-
-    if (tile.shakeIntensity > 0) {
-      drawX += (Math.random() - 0.5) * tile.shakeIntensity;
-      drawY += (Math.random() - 0.5) * tile.shakeIntensity;
-    }
-
-    if (tile.state === 'collapsed') {
-      // 3D falling into abyss
-      drawZ = tile.fallVelocityZ * tile.fallProgress;
-      drawY += drawZ * 0.8; // Isometric downward fall
-      alpha = Math.max(0, 1.0 - tile.fallProgress);
-      scale = Math.max(0.2, 1.0 - tile.fallProgress * 0.5);
-    } else if (tile.state === 'respawning') {
-      // 3D ascending from void matrix
-      drawZ = 80 * tile.fallProgress;
-      drawY += drawZ * 0.8;
-      alpha = Math.max(0.2, 1.0 - tile.fallProgress * 0.8);
-      scale = Math.max(0.4, 1.0 - tile.fallProgress * 0.4);
-    }
-
-    ctx.globalAlpha = alpha;
-    ctx.translate(drawX, drawY);
-
-    if ((tile.state === 'collapsed' || tile.state === 'respawning') && tile.fallRotation !== 0) {
-      ctx.rotate(tile.fallRotation);
-    }
-    if (scale !== 1.0) {
-      ctx.scale(scale, scale);
-    }
-
     const size = tile.size;
-    const h = tile.height;
+    const yOffset = tile.fallProgress * 60;
+
+    ctx.translate(tile.worldX, tile.worldY + yOffset);
+    if (tile.fallProgress > 0) {
+      ctx.globalAlpha = Math.max(0, 1.0 - tile.fallProgress);
+    }
+
+    // Color theme based on tile state
+    let topColor = '#1A233A';
+    let topStroke = 'rgba(0, 229, 255, 0.4)';
+    let sideBaseColor = '#0E1424';
+
+    if (tile.state === 'stable') {
+      topColor = '#162238';
+      topStroke = 'rgba(0, 229, 255, 0.5)';
+      sideBaseColor = '#0C1322';
+    } else if (tile.state === 'warning') {
+      const flash = 0.5 + 0.5 * Math.sin(Date.now() * 0.012 + tile.crackSeed);
+      topColor = flash > 0.5 ? '#3D2800' : '#261800';
+      topStroke = '#FFB224';
+      sideBaseColor = '#1F1200';
+    } else if (tile.state === 'crumbling') {
+      const flash = 0.5 + 0.5 * Math.sin(Date.now() * 0.025 + tile.crackSeed);
+      topColor = flash > 0.5 ? '#4A0818' : '#2D040E';
+      topStroke = '#FF3366';
+      sideBaseColor = '#1A0006';
+    } else if (tile.state === 'respawning') {
+      topColor = '#002E38';
+      topStroke = '#00E5FF';
+      sideBaseColor = '#00181F';
+    }
+
+    // --- 1. RENDER 3D SIDE EXTRUSIONS --- //
+    const height = tile.height;
     const corners = HexGrid.getHexCorners(0, 0, size);
 
-    // Color definitions based on state
-    let topColor = '#00F5A0'; // Safe Mint
-    let topStroke = '#00E5FF'; // Electric Cyan
-    let sideBaseColor = '#006655';
-    let glowColor = 'rgba(0, 245, 160, 0.4)';
+    if (height > 0) {
+      for (let i = 1; i <= 3; i++) {
+        const c1 = corners[i];
+        const c2 = corners[(i + 1) % 6];
+        const sideGrad = ctx.createLinearGradient(0, 0, 0, height);
+        sideGrad.addColorStop(0, sideBaseColor);
+        sideGrad.addColorStop(1, '#05070D');
 
-    switch (tile.state) {
-      case 'stable':
-        topColor = '#00F5A0';
-        topStroke = '#00E5FF';
-        sideBaseColor = '#00594C';
-        glowColor = 'rgba(0, 245, 160, 0.35)';
-        break;
+        ctx.fillStyle = sideGrad;
+        ctx.beginPath();
+        ctx.moveTo(c1.x, c1.y);
+        ctx.lineTo(c2.x, c2.y);
+        ctx.lineTo(c2.x, c2.y + height);
+        ctx.lineTo(c1.x, c1.y + height);
+        ctx.closePath();
+        ctx.fill();
 
-      case 'warning': {
-        const pulse = 0.5 + 0.5 * Math.sin(tile.glowPulsePhase * 3);
-        topColor = pulse > 0.5 ? '#FFB224' : '#CC8800';
-        topStroke = '#FFE600';
-        sideBaseColor = '#664400';
-        glowColor = 'rgba(255, 178, 36, 0.5)';
-        break;
-      }
-
-      case 'crumbling': {
-        const flash = 0.6 + 0.4 * Math.sin(tile.glowPulsePhase * 8);
-        topColor = flash > 0.5 ? '#FF3366' : '#990022';
-        topStroke = '#FF88AA';
-        sideBaseColor = '#590018';
-        glowColor = 'rgba(255, 51, 102, 0.7)';
-        break;
-      }
-
-      case 'collapsed':
-        topColor = '#441122';
-        topStroke = '#662233';
-        sideBaseColor = '#220811';
-        glowColor = 'rgba(255, 51, 102, 0.2)';
-        break;
-
-      case 'respawning': {
-        const pulse = 0.5 + 0.5 * Math.sin(tile.glowPulsePhase * 4);
-        topColor = '#00E5FF';
-        topStroke = '#FFFFFF';
-        sideBaseColor = '#004466';
-        glowColor = `rgba(0, 229, 255, ${0.4 + 0.3 * pulse})`;
-        break;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
     }
 
-    // --- 1. RENDER 3D EXTRUDED SIDE FACES --- //
-    // The front/lower edges of the pointy-topped hexagon are vertices [1, 2, 3, 4]
-    // Pointy-topped vertices: 0 (top-right), 1 (bottom-right), 2 (bottom), 3 (bottom-left), 4 (top-left), 5 (top)
-    // Facet A: [1 -> 2], Facet B: [2 -> 3], Facet C: [3 -> 4]
-    const facets = [
-      { i1: 1, i2: 2, shade: 0.85 }, // bottom-right facet
-      { i1: 2, i2: 3, shade: 0.70 }, // bottom-center facet
-      { i1: 3, i2: 4, shade: 0.55 }, // bottom-left facet
-    ];
-
-    for (const f of facets) {
-      const p1 = corners[f.i1];
-      const p2 = corners[f.i2];
-
-      ctx.fillStyle = sideBaseColor;
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.lineTo(p2.x, p2.y + h);
-      ctx.lineTo(p1.x, p1.y + h);
-      ctx.closePath();
-      ctx.fill();
-
-      // Shading overlay
-      ctx.fillStyle = `rgba(0, 0, 0, ${1 - f.shade})`;
-      ctx.fill();
-
-      // Side facet borders
-      ctx.strokeStyle = `rgba(0, 0, 0, 0.4)`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // Bottom rim line
-    ctx.strokeStyle = `rgba(0, 0, 0, 0.6)`;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(corners[1].x, corners[1].y + h);
-    ctx.lineTo(corners[2].x, corners[2].y + h);
-    ctx.lineTo(corners[3].x, corners[3].y + h);
-    ctx.lineTo(corners[4].x, corners[4].y + h);
-    ctx.stroke();
-
-    // --- 2. RENDER TOP HEXAGON FACE --- //
+    // --- 2. RENDER HEXAGON TOP FACE --- //
     ctx.beginPath();
     ctx.moveTo(corners[0].x, corners[0].y);
     for (let i = 1; i < 6; i++) {
@@ -447,13 +372,10 @@ export class LastPlatformRenderer {
     ctx.fillStyle = topGrad;
     ctx.fill();
 
-    // Glow border
+    // Glow border (0 shadowBlur)
     ctx.strokeStyle = topStroke;
     ctx.lineWidth = 2.0;
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur = tile.state === 'crumbling' ? 14 : 6;
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // --- 3. INNER CYBER RUNES & STATE DECALS --- //
     if (tile.state === 'stable') {
@@ -469,7 +391,7 @@ export class LastPlatformRenderer {
       ctx.closePath();
       ctx.stroke();
 
-      // Center glowing core dot
+      // Center core dot
       ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
       ctx.beginPath();
       ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
@@ -511,8 +433,6 @@ export class LastPlatformRenderer {
     ctx.save();
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 1.8;
-    ctx.shadowColor = '#FF3366';
-    ctx.shadowBlur = 8;
 
     const crackCount = 4;
     for (let i = 0; i < crackCount; i++) {
@@ -536,7 +456,6 @@ export class LastPlatformRenderer {
       ctx.stroke();
     }
 
-    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
@@ -573,8 +492,6 @@ export class LastPlatformRenderer {
       // Outer expanding kinetic shock ring
       ctx.strokeStyle = sw.color;
       ctx.lineWidth = Math.max(2, 6 * (1 - sw.life / sw.maxLife));
-      ctx.shadowColor = sw.color;
-      ctx.shadowBlur = 18;
       ctx.globalAlpha = sw.alpha;
 
       ctx.beginPath();
@@ -678,8 +595,6 @@ export class LastPlatformRenderer {
         const flameLength = 8 + p.moveMagnitude * 12 + Math.random() * 6;
 
         ctx.fillStyle = '#00E5FF';
-        ctx.shadowColor = '#00E5FF';
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.moveTo(Math.cos(thrusterAngle) * thrustDist, Math.sin(thrusterAngle) * thrustDist);
         ctx.lineTo(
@@ -711,11 +626,9 @@ export class LastPlatformRenderer {
       ctx.arc(0, 0, bodyRadius, 0, Math.PI * 2);
       ctx.fill();
 
-      // Neon Rim Outline
+      // Neon Rim Outline (0 shadowBlur)
       ctx.strokeStyle = p.hitFlashTimer > 0 ? '#FFFFFF' : p.color;
       ctx.lineWidth = 2.5;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 12;
       ctx.stroke();
 
       // Avatar Icon / Mech Core Glyph in center
@@ -738,8 +651,6 @@ export class LastPlatformRenderer {
       if (p.freezeShotCooldown <= 0 && !p.isFallingIntoVoid && !p.isFrozen) {
         ctx.strokeStyle = '#00E5FF';
         ctx.lineWidth = 1.8;
-        ctx.shadowColor = '#00E5FF';
-        ctx.shadowBlur = 10;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
         ctx.arc(0, 0, bodyRadius + 6, 0, Math.PI * 2);
@@ -754,8 +665,6 @@ export class LastPlatformRenderer {
         ctx.strokeStyle = '#00E5FF';
         ctx.fillStyle = 'rgba(0, 229, 255, 0.35)';
         ctx.lineWidth = 2.5;
-        ctx.shadowColor = '#00E5FF';
-        ctx.shadowBlur = 16;
 
         // Crystalline Hexagon Shell
         ctx.beginPath();
@@ -783,7 +692,6 @@ export class LastPlatformRenderer {
         ctx.restore();
       }
 
-      ctx.shadowBlur = 0;
       ctx.restore();
 
       // 4. Overhead Nameplate & HUD (Rendered upright without rotation)
@@ -812,10 +720,7 @@ export class LastPlatformRenderer {
       ctx.fillRect(-barW / 2, offsetY - 7, barW, barH);
 
       ctx.fillStyle = '#00E5FF';
-      ctx.shadowColor = '#00E5FF';
-      ctx.shadowBlur = 4;
       ctx.fillRect(-barW / 2, offsetY - 7, barW * progress, barH);
-      ctx.shadowBlur = 0;
     }
 
     // Name badge pill with avatar icon
@@ -830,14 +735,11 @@ export class LastPlatformRenderer {
     ctx.fillStyle = 'rgba(11, 13, 18, 0.85)';
     ctx.strokeStyle = p.color;
     ctx.lineWidth = 1;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 6;
 
     ctx.beginPath();
     ctx.roundRect(-pillW / 2, offsetY - pillH, pillW, pillH, 4);
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // Name Text
     ctx.fillStyle = '#FFFFFF';
@@ -867,8 +769,6 @@ export class LastPlatformRenderer {
       if (p.rotation !== 0) ctx.rotate(p.rotation);
 
       ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 6;
 
       switch (p.shape) {
         case 'spark':
@@ -916,8 +816,6 @@ export class LastPlatformRenderer {
 
       // Text
       ctx.fillStyle = ft.color;
-      ctx.shadowColor = ft.color;
-      ctx.shadowBlur = 10;
       ctx.fillText(ft.text, 0, 0);
 
       ctx.restore();
@@ -1018,8 +916,6 @@ export class LastPlatformRenderer {
         ctx.fillStyle = 'rgba(26, 5, 16, 0.92)';
         ctx.strokeStyle = '#FF3366';
         ctx.lineWidth = 1.5;
-        ctx.shadowColor = '#FF3366';
-        ctx.shadowBlur = 12;
 
         ctx.beginPath();
         ctx.roundRect(bannerX, bannerY, bannerW, bannerH, 8);
@@ -1046,8 +942,6 @@ export class LastPlatformRenderer {
 
         // Player Color Indicator Dot
         ctx.fillStyle = eb.playerColor;
-        ctx.shadowColor = eb.playerColor;
-        ctx.shadowBlur = 8;
         ctx.beginPath();
         ctx.arc(bannerX + bannerW - 18, bannerY + bannerH / 2, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -1078,8 +972,6 @@ export class LastPlatformRenderer {
       ctx.font = 'bold 14px "Space Grotesk", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#FF3366';
-      ctx.shadowBlur = 12;
       ctx.fillText('⚡ SUDDEN DEATH: PERIMETER DISSOLVING! STAY ON CORE HEXES! ⚡', width / 2, height - 40);
       ctx.restore();
     }

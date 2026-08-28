@@ -6,6 +6,10 @@ export class VoidTagBotAI {
     string,
     {
       timer: number;
+      tickCount: number;
+      currentMoveX: number;
+      currentMoveY: number;
+      currentAngle: number;
       cachedInput: ControllerInput;
     }
   > = {};
@@ -47,10 +51,15 @@ export class VoidTagBotAI {
     // Medium: balanced reactions (0.08-0.12s)
     // Hard: razor-sharp reactions (0.01-0.03s)
     const decisionInterval = diff === 'easy' ? 0.25 : diff === 'medium' ? 0.10 : 0.02;
+    const botHash = (bot.id.charCodeAt(bot.id.length - 1) || 0) % 5;
 
     if (!this.botStates[bot.id]) {
       this.botStates[bot.id] = {
         timer: 999,
+        tickCount: botHash,
+        currentMoveX: 0,
+        currentMoveY: 0,
+        currentAngle: bot.angle,
         cachedInput: {
           x: 0,
           y: 0,
@@ -65,8 +74,11 @@ export class VoidTagBotAI {
 
     const state = this.botStates[bot.id];
     state.timer += dt;
+    state.tickCount = (state.tickCount || 0) + 1;
 
-    if (state.timer >= decisionInterval) {
+    const isPerceptionTick = (state.tickCount % 5 === 0) || (state.timer >= decisionInterval);
+
+    if (isPerceptionTick) {
       state.timer = 0;
       if (bot.isHunter) {
         state.cachedInput = this.computeHunterInput(bot, allPlayers, sanctuaries, nebulae, debris, config, diff);
@@ -75,7 +87,28 @@ export class VoidTagBotAI {
       }
     }
 
-    return state.cachedInput;
+    // Lerp intermediate movement towards cached target input
+    const target = state.cachedInput;
+    const lerpSpeed = diff === 'hard' ? 18.0 : 12.0;
+    state.currentMoveX += (target.x - state.currentMoveX) * Math.min(1.0, dt * lerpSpeed);
+    state.currentMoveY += (target.y - state.currentMoveY) * Math.min(1.0, dt * lerpSpeed);
+
+    let angleDiff = target.angle - state.currentAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    state.currentAngle += angleDiff * Math.min(1.0, dt * lerpSpeed);
+
+    const currentMag = Math.hypot(state.currentMoveX, state.currentMoveY);
+
+    return {
+      x: state.currentMoveX,
+      y: state.currentMoveY,
+      angle: state.currentAngle,
+      magnitude: Math.min(1.0, currentMag),
+      action1: target.action1,
+      action2: target.action2,
+      timestamp: Date.now(),
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -90,58 +123,58 @@ export class VoidTagBotAI {
     config: VoidTagEngineConfig,
     difficulty: 'easy' | 'medium' | 'hard' = 'medium'
   ): ControllerInput {
-    const survivors = Object.values(allPlayers).filter(p => !p.isHunter && !p.isEliminated);
-    const otherHunters = Object.values(allPlayers).filter(p => p.isHunter && p.id !== hunter.id);
-
-    if (survivors.length === 0) {
-      // Wander around center if no survivors left
-      return this.createIdleMovement(hunter, config);
-    }
-
-    // 1. Determine Target Survivor
-    // Filter visible survivors (stealthed survivors in nebulae are hidden unless hunter is inside the same nebula)
-    const visibleSurvivors = survivors.filter(s => {
-      if (!s.isStealthed) return true;
-      // Check if hunter is in the same nebula as the survivor
-      return nebulae.some(neb => {
-        const dHunter = Math.hypot(hunter.x - neb.x, hunter.y - neb.y);
-        const dSurvivor = Math.hypot(s.x - neb.x, s.y - neb.y);
-        return dHunter <= neb.radius && dSurvivor <= neb.radius;
-      });
-    });
-
-    // Pick target: closest visible survivor, or fallback to closest survivor / sanctuary
     let targetSurvivor: VoidTagPlayerEntity | null = null;
     let minTargetDist = Infinity;
+    let hasAnySurvivors = false;
 
-    const candidates = visibleSurvivors.length > 0 ? visibleSurvivors : survivors;
+    // Single pass over allPlayers to pick closest / visible survivor
+    for (const id in allPlayers) {
+      const p = allPlayers[id];
+      if (p.isEliminated || p.id === hunter.id) continue;
 
-    for (const s of candidates) {
-      const dist = Math.hypot(s.x - hunter.x, s.y - hunter.y);
-      // Give slight penalty to survivors inside active sanctuaries
-      const sanctuaryWeight = s.isInSanctuary ? 1.5 : 1.0;
-      const weightedDist = dist * sanctuaryWeight;
+      if (!p.isHunter) {
+        hasAnySurvivors = true;
+        let isVisible = !p.isStealthed;
+        if (!isVisible) {
+          for (let i = 0; i < nebulae.length; i++) {
+            const neb = nebulae[i];
+            const dHunter = Math.hypot(hunter.x - neb.x, hunter.y - neb.y);
+            const dSurvivor = Math.hypot(p.x - neb.x, p.y - neb.y);
+            if (dHunter <= neb.radius && dSurvivor <= neb.radius) {
+              isVisible = true;
+              break;
+            }
+          }
+        }
 
-      if (weightedDist < minTargetDist) {
-        minTargetDist = weightedDist;
-        targetSurvivor = s;
+        const dist = Math.hypot(p.x - hunter.x, p.y - hunter.y);
+        const sanctuaryWeight = p.isInSanctuary ? 1.5 : 1.0;
+        const stealthWeight = isVisible ? 1.0 : 2.5;
+        const weightedDist = dist * sanctuaryWeight * stealthWeight;
+
+        if (weightedDist < minTargetDist) {
+          minTargetDist = weightedDist;
+          targetSurvivor = p;
+        }
       }
     }
 
-    if (!targetSurvivor) {
-      targetSurvivor = survivors[0];
+    if (!hasAnySurvivors || !targetSurvivor) {
+      return this.createIdleMovement(hunter, config);
     }
 
     const distToTarget = Math.hypot(targetSurvivor.x - hunter.x, targetSurvivor.y - hunter.y);
 
     // 2. Flanking & Interception Logic
-    // If multiple hunters, rank this hunter's distance to target compared to peer hunters
     let isPrimaryChaser = true;
-    for (const peer of otherHunters) {
-      const peerDist = Math.hypot(targetSurvivor.x - peer.x, targetSurvivor.y - peer.y);
-      if (peerDist < distToTarget * 0.9) {
-        isPrimaryChaser = false;
-        break;
+    for (const id in allPlayers) {
+      const peer = allPlayers[id];
+      if (peer.isHunter && peer.id !== hunter.id && !peer.isEliminated) {
+        const peerDist = Math.hypot(targetSurvivor.x - peer.x, targetSurvivor.y - peer.y);
+        if (peerDist < distToTarget * 0.9) {
+          isPrimaryChaser = false;
+          break;
+        }
       }
     }
 
@@ -215,16 +248,13 @@ export class VoidTagBotAI {
 
     // Use Dash when closing in on a survivor in line of sight
     if (hunter.dashCooldown <= 0 && distToTarget > 110 && distToTarget < (difficulty === 'hard' ? 280 : 250)) {
-      // Check angle alignment
       const angleToTarget = Math.atan2(targetSurvivor.y - hunter.y, targetSurvivor.x - hunter.x);
       const angleDiff = Math.abs(this.normalizeAngle(hunter.angle - angleToTarget));
 
-      // Line of sight check through debris
       const hasLOS = this.hasLineOfSight(hunter.x, hunter.y, targetSurvivor.x, targetSurvivor.y, debris);
 
       if (angleDiff < (difficulty === 'hard' ? 0.65 : 0.50) && hasLOS) {
         if (difficulty === 'easy') {
-          // Easy: 20% dash chance
           action1 = Math.random() < 0.20;
         } else {
           action1 = true;
@@ -255,9 +285,6 @@ export class VoidTagBotAI {
     config: VoidTagEngineConfig,
     difficulty: 'easy' | 'medium' | 'hard' = 'medium'
   ): ControllerInput {
-    const hunters = Object.values(allPlayers).filter(p => p.isHunter && !p.isEliminated);
-    const archetype = survivor.botArchetype || 'defensive';
-
     // 1. Calculate Threat & Threat Vectors from all Hunters
     let threatVectorX = 0;
     let threatVectorY = 0;
@@ -265,7 +292,10 @@ export class VoidTagBotAI {
     let closestHunter: VoidTagPlayerEntity | null = null;
     let totalThreatWeight = 0;
 
-    for (const hunter of hunters) {
+    for (const id in allPlayers) {
+      const hunter = allPlayers[id];
+      if (!hunter.isHunter || hunter.isEliminated) continue;
+
       const dx = survivor.x - hunter.x;
       const dy = survivor.y - hunter.y;
       const dist = Math.hypot(dx, dy);
@@ -275,7 +305,6 @@ export class VoidTagBotAI {
         closestHunter = hunter;
       }
 
-      // Stunned hunters pose much lower immediate threat
       const stunMultiplier = hunter.isStunned ? 0.15 : 1.0;
       const dangerThreshold = difficulty === 'hard' ? 520 : difficulty === 'easy' ? 400 : 480;
 
@@ -300,8 +329,9 @@ export class VoidTagBotAI {
       const dist = Math.hypot(sanc.x - survivor.x, sanc.y - survivor.y);
       let score = (sanc.energy / 100) * 200 - dist * 0.4;
 
-      // Penalize sanctuaries if a hunter is standing right in/near them
-      for (const h of hunters) {
+      for (const id in allPlayers) {
+        const h = allPlayers[id];
+        if (!h.isHunter || h.isEliminated) continue;
         const hDist = Math.hypot(sanc.x - h.x, sanc.y - h.y);
         if (hDist < sanc.radius + 60) {
           score -= 150;

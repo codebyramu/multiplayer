@@ -57,7 +57,9 @@ export class NeonRelayRenderer {
     this.drawBoostPads(ctx, track.boostPads);
 
     // 4. Draw Checkpoints
-    this.drawCheckpoints(ctx, track.checkpoints, racers, focusedPlayerId);
+    const activeRacer = racers.find((r) => r.id === focusedPlayerId) || racers[0];
+    const activeCpIndex = activeRacer?.nextCheckpointIndex ?? 0;
+    this.drawCheckpoints(ctx, track.checkpoints, activeCpIndex);
 
     // 5. Draw Laser Hazards
     this.drawLaserHazards(ctx, track.lasers);
@@ -182,8 +184,6 @@ export class NeonRelayRenderer {
 
     // Sharp bright neon core pass
     ctx.strokeStyle = primaryColor;
-    ctx.shadowColor = primaryColor;
-    ctx.shadowBlur = 12;
     ctx.lineWidth = 3;
     ctx.beginPath();
     for (const seg of boundaries) {
@@ -191,7 +191,6 @@ export class NeonRelayRenderer {
       ctx.lineTo(seg.p2.x, seg.p2.y);
     }
     ctx.stroke();
-    ctx.shadowBlur = 0;
   }
 
   // --- 2.5 Supercharge Highway Zones --- //
@@ -219,11 +218,13 @@ export class NeonRelayRenderer {
       ctx.fillStyle = highwayGrad;
       ctx.fillRect(-halfW, -halfH, zone.width, zone.height);
 
-      // 2. High-Voltage Highway Energy Borders
-      ctx.strokeStyle = `rgba(255, 230, 0, ${0.8 * pulse})`;
-      ctx.shadowColor = '#FFE600';
-      ctx.shadowBlur = 20;
-      ctx.lineWidth = 3.5;
+      // 2. High-Voltage Highway Energy Borders (Layered stroke, 0 shadowBlur)
+      ctx.strokeStyle = `rgba(255, 230, 0, ${0.3 * pulse})`;
+      ctx.lineWidth = 8;
+      ctx.strokeRect(-halfW, -halfH, zone.width, zone.height);
+
+      ctx.strokeStyle = `rgba(255, 230, 0, ${0.9 * pulse})`;
+      ctx.lineWidth = 3;
       ctx.strokeRect(-halfW, -halfH, zone.width, zone.height);
 
       // 3. Fast Streaming Directional Supercharge Chevrons
@@ -232,9 +233,7 @@ export class NeonRelayRenderer {
       const scrollOffset = (this.animTimer * 280) % spacing;
 
       ctx.strokeStyle = '#FFE600';
-      ctx.shadowColor = '#FFE600';
-      ctx.shadowBlur = 12;
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 3.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -264,8 +263,6 @@ export class NeonRelayRenderer {
       // 5. Floating Holographic Zone Label
       ctx.font = 'bold 15px "Courier New", monospace';
       ctx.fillStyle = '#FFE600';
-      ctx.shadowColor = '#FFE600';
-      ctx.shadowBlur = 14;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const timeRemaining = Math.max(0, Math.ceil(zone.remainingTime));
@@ -291,8 +288,6 @@ export class NeonRelayRenderer {
       ctx.fillStyle = 'rgba(0, 229, 255, 0.08)';
       ctx.strokeStyle = '#00E5FF';
       ctx.lineWidth = 2;
-      ctx.shadowColor = '#00E5FF';
-      ctx.shadowBlur = 10;
       ctx.strokeRect(-halfW, -halfH, pad.width, pad.height);
       ctx.fillRect(-halfW, -halfH, pad.width, pad.height);
 
@@ -302,8 +297,6 @@ export class NeonRelayRenderer {
       const scrollOffset = (this.animTimer * 120) % spacing;
 
       ctx.strokeStyle = '#FFB224';
-      ctx.shadowColor = '#FFB224';
-      ctx.shadowBlur = 8;
       ctx.lineWidth = 3;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -324,27 +317,23 @@ export class NeonRelayRenderer {
     ctx.restore();
   }
 
-  // --- 4. Checkpoints & Finish Arch --- //
+  // --- 4. Circuit Gates & Checkpoints --- //
   private drawCheckpoints(
     ctx: CanvasRenderingContext2D,
     checkpoints: CheckpointData[],
-    racers: HovercraftRacer[],
-    focusedPlayerId?: string
+    activeCheckpointIndex: number
   ): void {
-    const focusedRacer = racers.find((r) => r.id === focusedPlayerId);
-    const activeTargetIdx = focusedRacer ? focusedRacer.nextCheckpointIndex : 0;
-
     ctx.save();
+    const pulse = Math.sin(this.animTimer * 6) * 0.3 + 0.7;
+
     for (let i = 0; i < checkpoints.length; i++) {
       const cp = checkpoints[i];
-      const isCurrentActive = i === activeTargetIdx;
-      const pulse = Math.sin(this.animTimer * 4 + cp.pulsePhase) * 0.5 + 0.5;
-
+      const isCurrentActive = i === activeCheckpointIndex;
       ctx.save();
       ctx.translate(cp.x, cp.y);
 
       if (cp.isFinishLine) {
-        // --- START / FINISH GRAND ARCHWAY --- //
+        // --- FINISH LINE ARCH & PYLONS --- //
         ctx.rotate(cp.angle);
         const halfGate = cp.width / 2;
 
@@ -358,17 +347,21 @@ export class NeonRelayRenderer {
           ctx.fillRect(checkX, -10, checkW, 20);
         }
 
-        // Finish Gate Pylons
+        // Finish Gate Pylons (Layered outer halo)
+        ctx.fillStyle = 'rgba(0, 245, 160, 0.3)';
+        ctx.beginPath();
+        ctx.arc(-halfGate, 0, 20, 0, Math.PI * 2);
+        ctx.arc(halfGate, 0, 20, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = '#00F5A0';
-        ctx.shadowColor = '#00F5A0';
-        ctx.shadowBlur = 16;
         ctx.beginPath();
         ctx.arc(-halfGate, 0, 14, 0, Math.PI * 2);
         ctx.arc(halfGate, 0, 14, 0, Math.PI * 2);
         ctx.fill();
 
         // Pulsing Beam across finish line
-        ctx.strokeStyle = `rgba(0, 245, 160, ${0.4 + pulse * 0.4})`;
+        ctx.strokeStyle = 'rgba(0, 245, 160, 0.6)';
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.moveTo(-halfGate, 0);
@@ -384,14 +377,11 @@ export class NeonRelayRenderer {
       } else {
         // --- REGULAR CIRCUIT CHECKPOINT --- //
         const color = isCurrentActive ? '#00E5FF' : 'rgba(0, 229, 255, 0.25)';
-        const glowBlur = isCurrentActive ? 16 + pulse * 8 : 0;
 
         // Outer Rotating Dashed Ring
         ctx.save();
         ctx.rotate(this.animTimer * (isCurrentActive ? 1.5 : 0.5));
         ctx.strokeStyle = color;
-        ctx.shadowColor = isCurrentActive ? '#00E5FF' : 'transparent';
-        ctx.shadowBlur = glowBlur;
         ctx.lineWidth = isCurrentActive ? 3 : 1.5;
         ctx.setLineDash(isCurrentActive ? [12, 16] : [6, 12]);
         ctx.beginPath();
@@ -401,10 +391,7 @@ export class NeonRelayRenderer {
 
         // Inner Radial Glow
         if (isCurrentActive) {
-          const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, cp.radius * 0.8);
-          grad.addColorStop(0, 'rgba(0, 229, 255, 0.25)');
-          grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
-          ctx.fillStyle = grad;
+          ctx.fillStyle = 'rgba(0, 229, 255, 0.15)';
           ctx.beginPath();
           ctx.arc(0, 0, cp.radius * 0.8, 0, Math.PI * 2);
           ctx.fill();
@@ -443,17 +430,15 @@ export class NeonRelayRenderer {
 
       // Emitter Pylons at both ends
       ctx.fillStyle = laser.isActive ? '#FF3366' : laser.isWarning ? '#FFB224' : '#4A5568';
-      ctx.shadowColor = laser.isActive ? '#FF3366' : '#FFB224';
-      ctx.shadowBlur = laser.isActive ? 12 : laser.isWarning ? 6 : 0;
       ctx.beginPath();
       ctx.arc(p1.x, p1.y, 8, 0, Math.PI * 2);
       ctx.arc(p2.x, p2.y, 8, 0, Math.PI * 2);
       ctx.fill();
 
       if (laser.isActive) {
-        // LETHAL ACTIVE LASER BEAM
+        // LETHAL ACTIVE LASER BEAM (3-pass crisp stroke, 0 shadowBlur)
         // 1. Wide plasma glow
-        ctx.strokeStyle = 'rgba(255, 51, 102, 0.45)';
+        ctx.strokeStyle = 'rgba(255, 51, 102, 0.35)';
         ctx.lineWidth = 14 + Math.sin(this.animTimer * 30) * 3;
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
@@ -462,8 +447,6 @@ export class NeonRelayRenderer {
 
         // 2. Bright hot magenta beam
         ctx.strokeStyle = '#FF3366';
-        ctx.shadowColor = '#FF3366';
-        ctx.shadowBlur = 18;
         ctx.lineWidth = 5;
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
@@ -520,8 +503,6 @@ export class NeonRelayRenderer {
       const perpY = Math.cos(follower.angle) * 12;
 
       ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
-      ctx.shadowColor = '#00E5FF';
-      ctx.shadowBlur = 10;
       ctx.lineWidth = 2;
       ctx.setLineDash([12, 10]);
 
@@ -586,8 +567,6 @@ export class NeonRelayRenderer {
         // Dual Exhaust Flames
         for (const offY of [-9, 9]) {
           ctx.fillStyle = flameColor;
-          ctx.shadowColor = flameColor;
-          ctx.shadowBlur = racer.isBoosting ? 16 : 8;
           ctx.beginPath();
           ctx.moveTo(-16, offY - 4);
           ctx.lineTo(-16 - flameLen, offY);
@@ -610,22 +589,34 @@ export class NeonRelayRenderer {
       // Hull Base & Impact Flash
       let hullColor = '#141A29';
       let strokeColor = racer.finished ? '#FFD700' : racer.color;
-      let glowBlur = isFocused ? 14 : 6;
 
       if (racer.flashTimer > 0) {
         hullColor = '#FFFFFF';
         strokeColor = '#FF3366';
-        glowBlur = 24;
       } else if (racer.isStunned) {
         hullColor = Math.floor(this.animTimer * 20) % 2 === 0 ? '#FF3366' : '#FFFFFF';
         strokeColor = '#FF3366';
-        glowBlur = 18;
+      }
+
+      // Hull Outer Halo (for focused racer)
+      if (isFocused) {
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(26, 0);
+        ctx.lineTo(8, 14);
+        ctx.lineTo(-16, 17);
+        ctx.lineTo(-20, 11);
+        ctx.lineTo(-17, 0);
+        ctx.lineTo(-20, -11);
+        ctx.lineTo(-16, -17);
+        ctx.lineTo(8, -14);
+        ctx.closePath();
+        ctx.stroke();
       }
 
       ctx.fillStyle = hullColor;
       ctx.strokeStyle = strokeColor;
-      ctx.shadowColor = strokeColor;
-      ctx.shadowBlur = glowBlur;
       ctx.lineWidth = 2.5;
 
       ctx.beginPath();
@@ -675,8 +666,6 @@ export class NeonRelayRenderer {
       if (racer.invulnerableTimer > 0) {
         const shieldPulse = Math.sin(this.animTimer * 16) * 0.3 + 0.7;
         ctx.strokeStyle = `rgba(0, 229, 255, ${shieldPulse})`;
-        ctx.shadowColor = '#00E5FF';
-        ctx.shadowBlur = 16;
         ctx.lineWidth = 2.5;
         ctx.setLineDash([8, 8]);
         ctx.beginPath();
@@ -688,8 +677,6 @@ export class NeonRelayRenderer {
       // Boost Pad Speed Flare Ring
       if (racer.boostPadTimer > 0) {
         ctx.strokeStyle = '#FFB224';
-        ctx.shadowColor = '#FFB224';
-        ctx.shadowBlur = 20;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(0, 0, 28 + Math.sin(this.animTimer * 20) * 3, 0, Math.PI * 2);
@@ -700,8 +687,6 @@ export class NeonRelayRenderer {
       if (racer.finished) {
         const winPulse = Math.sin(this.animTimer * 5) * 0.25 + 0.75;
         ctx.strokeStyle = `rgba(255, 215, 0, ${winPulse})`;
-        ctx.shadowColor = '#FFD700';
-        ctx.shadowBlur = 22;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(0, 0, 33, 0, Math.PI * 2);
@@ -718,8 +703,6 @@ export class NeonRelayRenderer {
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = isFocused ? '#00E5FF' : '#E2E8F0';
-      ctx.shadowColor = racer.finished ? '#FFD700' : racer.color;
-      ctx.shadowBlur = 6;
       ctx.fillText(racer.player.name.slice(0, 12), 0, 0);
 
       // Nitro Energy Mini-Bar (if racing and not full)
@@ -737,8 +720,6 @@ export class NeonRelayRenderer {
         const badge = racer.finishRank === 1 ? '🏆 1ST' : racer.finishRank === 2 ? '🥈 2ND' : racer.finishRank === 3 ? '🥉 3RD' : `P${racer.finishRank}`;
         ctx.font = 'bold 12px "Courier New", monospace';
         ctx.fillStyle = racer.finishRank === 1 ? '#FFD700' : '#00F5A0';
-        ctx.shadowColor = '#FFD700';
-        ctx.shadowBlur = 8;
         ctx.fillText(`${badge} FINISHED`, 0, -14);
       } else if (racer.isStunned) {
         ctx.font = 'bold 13px sans-serif';
@@ -788,8 +769,6 @@ export class NeonRelayRenderer {
       ctx.fillStyle = 'rgba(11, 15, 25, 0.85)';
       ctx.strokeStyle = '#00E5FF';
       ctx.lineWidth = 1.5;
-      ctx.shadowColor = '#00E5FF';
-      ctx.shadowBlur = 10;
       this.roundRect(ctx, width / 2 - 145, 16, 290, 52, 10);
       ctx.fill();
       ctx.stroke();
@@ -854,8 +833,6 @@ export class NeonRelayRenderer {
       ctx.fillStyle = 'rgba(11, 15, 25, 0.9)';
       ctx.strokeStyle = focusedRacer.isBoosting ? '#00E5FF' : '#FFB224';
       ctx.lineWidth = 2;
-      ctx.shadowColor = focusedRacer.isBoosting ? '#00E5FF' : '#FFB224';
-      ctx.shadowBlur = 10;
       this.roundRect(ctx, hudX, hudY, hudW, hudH, 8);
       ctx.fill();
       ctx.stroke();
@@ -928,8 +905,6 @@ export class NeonRelayRenderer {
       const isLeader = sortedRacers[0]?.id === r.id;
 
       ctx.fillStyle = r.color;
-      ctx.shadowColor = r.color;
-      ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(rx, ry, isLeader ? 4 : 3, 0, Math.PI * 2);
       ctx.fill();

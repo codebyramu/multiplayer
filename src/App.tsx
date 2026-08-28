@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameId, RoomState, Player, ControllerInput, MatchResults, PlayerClientHUDState, TournamentMode, TournamentState } from './types';
 import { socketClient } from './multiplayer/SocketClient';
+import { p2pClient } from './multiplayer/P2PClient';
+import { p2pHostServer } from './multiplayer/P2PHostServer';
 import { LocalRoomEngine } from './multiplayer/LocalRoomEngine';
 import { WebRTCManager } from './multiplayer/WebRTCManager';
 import { soundManager } from './audio/SoundManager';
@@ -41,17 +43,19 @@ export const App: React.FC = () => {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [hudState, setHudState] = useState<PlayerClientHUDState | null>(null);
   const [allHudStates, setAllHudStates] = useState<Record<string, PlayerClientHUDState>>({});
-  const [remoteInputs, setRemoteInputs] = useState<Record<string, ControllerInput>>({});
+  
+  // Mutable remote inputs ref to completely prevent React re-renders on high-frequency controller input packets (60-240Hz)
+  const remoteInputsRef = useRef<Record<string, ControllerInput>>({});
 
   // WebRTC Peer-to-Peer Direct DataChannel Managers
-  const hostWebRTCRef = React.useRef<WebRTCManager | null>(null);
-  const clientWebRTCRef = React.useRef<WebRTCManager | null>(null);
+  const hostWebRTCRef = useRef<WebRTCManager | null>(null);
+  const clientWebRTCRef = useRef<WebRTCManager | null>(null);
 
   // Setup Host WebRTC on Host view
   useEffect(() => {
     if (currentTab === 'host') {
       hostWebRTCRef.current = new WebRTCManager(true, (pid, input) => {
-        setRemoteInputs((prev) => ({ ...prev, [pid]: input }));
+        remoteInputsRef.current[pid] = input;
       });
     } else {
       hostWebRTCRef.current?.closeAll();
@@ -131,10 +135,11 @@ export const App: React.FC = () => {
     });
 
     const unbindClientInput = socketClient.on('client-input', (data: { playerId: string; input: ControllerInput }) => {
-      setRemoteInputs((prev) => ({
-        ...prev,
-        [data.playerId]: data.input,
-      }));
+      remoteInputsRef.current[data.playerId] = data.input;
+    });
+
+    const unbindP2PInput = p2pHostServer.on('client-input', (data: { playerId: string; input: ControllerInput }) => {
+      remoteInputsRef.current[data.playerId] = data.input;
     });
 
     const unbindSyncGameState = socketClient.on('sync-game-state', (data: any) => {
@@ -197,6 +202,7 @@ export const App: React.FC = () => {
       unbindCountdown();
       unbindGameStarted();
       unbindClientInput();
+      unbindP2PInput();
       unbindSyncGameState();
       unbindGameEnded();
       unbindReturnedLobby();
@@ -231,7 +237,6 @@ export const App: React.FC = () => {
 
     // 100% Serverless Host (TV/Laptop browser runs the room server via WebRTC P2P)
     try {
-      const { p2pHostServer } = await import('./multiplayer/P2PHostServer');
       const p2pRoom = await p2pHostServer.startHost(code, validGame, 3);
       setRoom(p2pRoom);
       setMatchState('lobby');
@@ -360,6 +365,7 @@ export const App: React.FC = () => {
 
   // 10. ADVANCE TO NEXT TOURNAMENT ROUND
   const handleTournamentNextRound = () => {
+    soundManager.stopAllSounds();
     const next = tournamentEngine.advanceToNextRound();
     if (next && room) {
       const nextGame = next.nextGame;
@@ -375,6 +381,7 @@ export const App: React.FC = () => {
 
   // 11. RESTART TOURNAMENT
   const handleRestartTournament = () => {
+    soundManager.stopAllSounds();
     if (!room) return;
     const newState = tournamentEngine.initTournament(tournamentMode, room.players, playlistSequence);
     setTournamentState(newState);
@@ -389,6 +396,7 @@ export const App: React.FC = () => {
 
   // 12. PLAY AGAIN (SINGLE MATCH)
   const handlePlayAgain = () => {
+    soundManager.stopAllSounds();
     setMatchResults(null);
     setMatchState('countdown');
     socketClient.startCountdown();
@@ -396,6 +404,7 @@ export const App: React.FC = () => {
 
   // 13. RETURN TO LOBBY
   const handleReturnToLobby = () => {
+    soundManager.stopAllSounds();
     setMatchResults(null);
     setShowTournamentLeaderboard(false);
     setTournamentState(null);
@@ -406,6 +415,7 @@ export const App: React.FC = () => {
 
   // 14. LEAVE / BACK TO HUB
   const handleLeaveToHub = () => {
+    soundManager.stopAllSounds();
     setRoom(null);
     setMatchState('idle');
     setMatchResults(null);
@@ -471,15 +481,11 @@ export const App: React.FC = () => {
   // 16. PLAYER CONTROLLER: Send Input (P2P Direct WebRTC with Socket fallback)
   const handleSendInput = (input: ControllerInput) => {
     // Direct P2P send to TV host
-    import('./multiplayer/P2PClient').then(({ p2pClient }) => {
-      if (p2pClient.isConnected) {
-        p2pClient.sendInput(input);
-        return;
-      }
-      socketClient.sendInput(input);
-    }).catch(() => {
-      socketClient.sendInput(input);
-    });
+    if (p2pClient.isConnected) {
+      p2pClient.sendInput(input);
+      return;
+    }
+    socketClient.sendInput(input);
   };
 
   return (
@@ -543,7 +549,8 @@ export const App: React.FC = () => {
             {matchState === 'playing' && (
               <HostGameView
                 room={room}
-                remoteInputs={remoteInputs}
+                remoteInputsRef={remoteInputsRef}
+                remoteInputs={remoteInputsRef.current}
                 onBroadcastHUDState={(hud) => socketClient.broadcastGameState({ hud: { [hud.playerId]: hud } })}
                 onGameEvent={(evt) => socketClient.sendGameEvent(evt)}
                 onMatchEnd={handleMatchEnd}

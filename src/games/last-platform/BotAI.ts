@@ -10,8 +10,12 @@ export class BotAI {
   
   // Tactical reaction timers
   private decisionTimer: number = 0;
+  private tickCount: number = 0;
   private targetX: number = 0;
   private targetY: number = 0;
+  private currentMoveX: number = 0;
+  private currentMoveY: number = 0;
+  private currentAngle: number = 0;
   private targetTileId: number | null = null;
   private reactionDelay: number = 0.08;
   
@@ -46,6 +50,8 @@ export class BotAI {
         : this.difficulty === 'hard'
         ? 0.01
         : 0.08;
+
+    this.tickCount = (botId.charCodeAt(botId.length - 1) || 0) % 5;
   }
 
   /**
@@ -62,6 +68,7 @@ export class BotAI {
     }
 
     this.decisionTimer += dt;
+    this.tickCount++;
     if (this.jumpPulseCooldown > 0) this.jumpPulseCooldown -= dt;
     if (this.shotPulseCooldown > 0) this.shotPulseCooldown -= dt;
 
@@ -98,28 +105,43 @@ export class BotAI {
 
     const isOverVoid = !currentTile || isOutsideStorm;
 
-    // Tactical decision timing
-    if (this.decisionTimer >= this.reactionDelay || isOverVoid || (isCurrentTileDangerous && this.difficulty !== 'easy')) {
+    // Staggered tactical decision timing (every 5 ticks or on critical danger)
+    const isPerceptionTick = (this.tickCount % 5 === 0) || (this.decisionTimer >= this.reactionDelay) || isOverVoid || (isCurrentTileDangerous && this.difficulty !== 'easy');
+    if (isPerceptionTick) {
       this.decisionTimer = 0;
       this.evaluateTargetPosition(botState, allPlayers, hexGrid, currentTile, isCurrentTileDangerous, isOverVoid);
     }
 
-    // 2. Compute Movement Vector towards Target
+    // 2. Compute Movement Vector towards Target with smooth lerp
     const dx = this.targetX - botState.x;
     const dy = this.targetY - botState.y;
     const distToTarget = Math.hypot(dx, dy);
 
-    let moveX = 0;
-    let moveY = 0;
-    let moveAngle = botState.facingAngle;
-    let magnitude = 0;
+    let targetMoveX = 0;
+    let targetMoveY = 0;
+    let targetAngle = botState.facingAngle;
+    let targetMagnitude = 0;
 
     if (distToTarget > 8) {
-      moveX = dx / distToTarget;
-      moveY = dy / distToTarget;
-      moveAngle = Math.atan2(dy, dx);
-      magnitude = Math.min(1.0, distToTarget / 40);
+      targetMoveX = dx / distToTarget;
+      targetMoveY = dy / distToTarget;
+      targetAngle = Math.atan2(dy, dx);
+      targetMagnitude = Math.min(1.0, distToTarget / 40);
     }
+
+    const lerpRate = this.difficulty === 'hard' ? 18.0 : 12.0;
+    this.currentMoveX += (targetMoveX - this.currentMoveX) * Math.min(1.0, dt * lerpRate);
+    this.currentMoveY += (targetMoveY - this.currentMoveY) * Math.min(1.0, dt * lerpRate);
+
+    let angleDelta = targetAngle - this.currentAngle;
+    while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+    while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+    this.currentAngle += angleDelta * Math.min(1.0, dt * lerpRate);
+
+    let moveX = this.currentMoveX;
+    let moveY = this.currentMoveY;
+    let moveAngle = this.currentAngle;
+    let magnitude = Math.min(1.0, Math.hypot(moveX, moveY) * (targetMagnitude > 0 ? 1.0 : 0));
 
     // 3. Jump, Air Hop, and Offensive Dash Shoves (action1)
     let wantAction1 = false;
@@ -286,12 +308,19 @@ export class BotAI {
       }
 
       case 'defensive': {
-        // Patrol across stable tiles in rings 1 and 2, actively moving rather than camping
-        const candidateTiles = hexGrid.tilesList.filter(
-          t => (t.state === 'stable' || t.state === 'warning') && t.ring >= 1 && t.ring <= 3
-        );
-        if (candidateTiles.length > 0) {
-          const randTile = candidateTiles[Math.floor(Math.random() * candidateTiles.length)];
+        // Patrol across stable tiles in rings 1 and 3, actively moving rather than camping
+        let randTile: PlatformTileData | null = null;
+        let count = 0;
+        for (let i = 0; i < hexGrid.tilesList.length; i++) {
+          const t = hexGrid.tilesList[i];
+          if ((t.state === 'stable' || t.state === 'warning') && t.ring >= 1 && t.ring <= 3) {
+            count++;
+            if (Math.random() < 1 / count) {
+              randTile = t;
+            }
+          }
+        }
+        if (randTile) {
           this.targetX = randTile.worldX;
           this.targetY = randTile.worldY;
           this.targetTileId = randTile.id;
@@ -319,9 +348,18 @@ export class BotAI {
 
       case 'chaotic': {
         if (Math.random() < 0.3 || !this.targetTileId) {
-          const candidateTiles = hexGrid.tilesList.filter(t => t.state === 'stable' && t.ring <= 3);
-          if (candidateTiles.length > 0) {
-            const randomTile = candidateTiles[Math.floor(Math.random() * candidateTiles.length)];
+          let randomTile: PlatformTileData | null = null;
+          let count = 0;
+          for (let i = 0; i < hexGrid.tilesList.length; i++) {
+            const t = hexGrid.tilesList[i];
+            if (t.state === 'stable' && t.ring <= 3) {
+              count++;
+              if (Math.random() < 1 / count) {
+                randomTile = t;
+              }
+            }
+          }
+          if (randomTile) {
             this.targetX = randomTile.worldX;
             this.targetY = randomTile.worldY;
             this.targetTileId = randomTile.id;

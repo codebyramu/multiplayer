@@ -3,6 +3,7 @@ import { BotPersonality, FoodPellet, GoldenStormZone, SingularityVortexZone, Ser
 
 export class SerpentAIBrain {
   private static decisionTimers: Record<string, number> = {};
+  private static scratchScores: number[] = new Array(16).fill(0);
   private static botStates: Record<
     string,
     {
@@ -13,7 +14,10 @@ export class SerpentAIBrain {
       ambushWaitTimer: number;
       lastDecisionTime: number;
       cachedDesiredAngle: number;
+      currentSteerAngle: number;
       cachedWantsBoost: boolean;
+      cachedUrgency: number;
+      tickCount: number;
     }
   > = {};
 
@@ -32,6 +36,7 @@ export class SerpentAIBrain {
   ): ControllerInput {
     const botId = bot.id;
     if (!this.botStates[botId]) {
+      const botHash = (botId.charCodeAt(botId.length - 1) || 0) % 5;
       this.botStates[botId] = {
         stateTimer: 0,
         targetAngle: bot.angle,
@@ -39,13 +44,17 @@ export class SerpentAIBrain {
         ambushWaitTimer: 0,
         lastDecisionTime: -999,
         cachedDesiredAngle: bot.angle,
+        currentSteerAngle: bot.angle,
         cachedWantsBoost: false,
+        cachedUrgency: 0,
+        tickCount: botHash,
       };
     }
 
     const state = this.botStates[botId];
     state.stateTimer += dt;
     state.chaoticPhase += dt * 3;
+    state.tickCount++;
 
     // Resolve difficulty (defaults to medium)
     const rawDiff = difficultyOverride || bot.difficulty || 'medium';
@@ -57,11 +66,14 @@ export class SerpentAIBrain {
     // Medium: balanced reactions (0.08-0.12s)
     // Hard: razor-sharp reactions (0.01-0.03s)
     const decisionInterval = difficulty === 'easy' ? 0.25 : difficulty === 'medium' ? 0.10 : 0.02;
+    const isFirstTick = state.lastDecisionTime === -999;
+    const isPerceptionTick = isFirstTick || (state.tickCount % 5 === 0) || (state.stateTimer - state.lastDecisionTime >= decisionInterval);
 
     let desiredAngle = state.cachedDesiredAngle;
     let wantsBoost = state.cachedWantsBoost;
+    let urgency = state.cachedUrgency;
 
-    if (state.stateTimer - state.lastDecisionTime >= decisionInterval) {
+    if (isPerceptionTick) {
       state.lastDecisionTime = state.stateTimer;
 
       const personality = bot.botPersonality || 'collector';
@@ -90,37 +102,45 @@ export class SerpentAIBrain {
       }
 
       // Easy wandering & boost adjustments
-      if (difficulty === 'easy') {
-        // Easy: wanders with wandering noise
+      if (difficulty === 'easy' && personality !== 'collector') {
         desiredAngle += Math.sin(state.chaoticPhase * 0.7) * 0.25;
-        // Easy: 20% boost chance
         wantsBoost = wantsBoost && Math.random() < 0.20;
+      }
+
+      // 2. WHISKER-BASED COLLISION AVOIDANCE & WALL RAYCASTING
+      const avoidance = this.computeCollisionAvoidance(bot, allSerpents, arenaRadius, difficulty);
+      urgency = avoidance.urgency;
+      if (avoidance.needsAvoidance) {
+        desiredAngle = avoidance.safeAngle;
+        state.currentSteerAngle = avoidance.safeAngle;
+        if (avoidance.urgency > 0.8 && bot.length > 20) {
+          if (difficulty !== 'easy' || Math.random() < 0.20) {
+            wantsBoost = true;
+          }
+        }
       }
 
       state.cachedDesiredAngle = desiredAngle;
       state.cachedWantsBoost = wantsBoost;
-    }
-
-    // 2. WHISKER-BASED COLLISION AVOIDANCE & WALL RAYCASTING
-    // Easy: wider collision margin (35px), relaxed turn
-    // Medium: balanced collision margin (12px)
-    // Hard: instant razor-sharp raycasts with surgical clearance (4px)
-    const avoidance = this.computeCollisionAvoidance(bot, allSerpents, arenaRadius, difficulty);
-    if (avoidance.needsAvoidance) {
-      desiredAngle = avoidance.safeAngle;
-      if (avoidance.urgency > 0.8 && bot.length > 20) {
-        if (difficulty !== 'easy' || Math.random() < 0.20) {
-          wantsBoost = true;
-        }
+      state.cachedUrgency = urgency;
+      if (isFirstTick) {
+        state.currentSteerAngle = desiredAngle;
       }
     }
 
+    // Smooth lerping of steering angle between staggered perception ticks
+    if (!isFirstTick) {
+      const steerDiff = this.angleDifference(state.currentSteerAngle, state.cachedDesiredAngle);
+      const steerLerpSpeed = difficulty === 'hard' ? 18.0 : 12.0;
+      state.currentSteerAngle += steerDiff * Math.min(1.0, dt * steerLerpSpeed);
+    }
+
     // Wrap desired angle to [0, 2*PI]
-    const normalizedAngle = (desiredAngle % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const normalizedAngle = (state.currentSteerAngle % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
 
     const isNearOverheat = (bot.continuousBoostDuration || 0) >= (difficulty === 'hard' ? 2.9 : 2.8);
     const minLengthForBoost = difficulty === 'hard' ? 12 : 14;
-    const allowBoost = wantsBoost && bot.length > minLengthForBoost && (!isNearOverheat || avoidance.urgency > 0.85);
+    const allowBoost = state.cachedWantsBoost && bot.length > minLengthForBoost && (!isNearOverheat || state.cachedUrgency > 0.85);
 
     return {
       x: Math.cos(normalizedAngle),
@@ -276,8 +296,10 @@ export class SerpentAIBrain {
       // Hard: Optimal Food Routing via cluster density & high-value pellets
       let bestFood: FoodPellet | null = null;
       let highestScore = -9999;
+      const sampleLimit = Math.min(60, foods.length);
 
-      for (const food of foods) {
+      for (let i = 0; i < sampleLimit; i++) {
+        const food = foods[i];
         const dist = Math.hypot(food.x - bot.x, food.y - bot.y);
         if (dist > 800) continue;
 
@@ -287,15 +309,6 @@ export class SerpentAIBrain {
         else if (food.type === 'jackpot') score *= 3.5;
         else if (food.type === 'magnetic') score *= 2.2;
         else if (food.type === 'shed') score *= 1.8;
-
-        // Density heuristic: check how many pellets are near this candidate
-        let nearbyCount = 0;
-        for (const other of foods) {
-          if (Math.hypot(other.x - food.x, other.y - food.y) < 90) {
-            nearbyCount++;
-          }
-        }
-        score += nearbyCount * 12;
 
         if (score > highestScore) {
           highestScore = score;
@@ -451,7 +464,7 @@ export class SerpentAIBrain {
     const collisionMargin =
       difficulty === 'easy' ? 35 : difficulty === 'hard' ? 4 : 12;
 
-    const scores = new Array(whiskerAngles.length).fill(0);
+    const scores = this.scratchScores;
     let maxThreatUrgency = 0;
 
     const inwardAngle = Math.atan2(-bot.y, -bot.x);
@@ -475,10 +488,26 @@ export class SerpentAIBrain {
         maxThreatUrgency = Math.max(maxThreatUrgency, Math.min(1.0, wallThreat));
       }
 
-      // 2. Check enemy snake bodies
+      // Ray AABB bounds
+      const rayMinX = Math.min(bot.x, rayEndX) - bot.headRadius - collisionMargin;
+      const rayMaxX = Math.max(bot.x, rayEndX) + bot.headRadius + collisionMargin;
+      const rayMinY = Math.min(bot.y, rayEndY) - bot.headRadius - collisionMargin;
+      const rayMaxY = Math.max(bot.y, rayEndY) + bot.headRadius + collisionMargin;
+
+      // 2. Check enemy snake bodies with coarse AABB broadphase
       for (const id in allSerpents) {
         const other = allSerpents[id];
         if (other.isDead) continue;
+
+        if (
+          other.minX !== undefined &&
+          (rayMaxX < other.minX ||
+           rayMinX > other.maxX! ||
+           rayMaxY < other.minY! ||
+           rayMinY > other.maxY!)
+        ) {
+          continue;
+        }
 
         const startSeg = other.id === bot.id ? 8 : 0; // Don't collide with own head/neck
 
@@ -520,7 +549,7 @@ export class SerpentAIBrain {
       let bestWhiskerIndex = centerIdx;
       let highestScore = -Infinity;
 
-      for (let w = 0; w < scores.length; w++) {
+      for (let w = 0; w < whiskerAngles.length; w++) {
         if (scores[w] > highestScore) {
           highestScore = scores[w];
           bestWhiskerIndex = w;

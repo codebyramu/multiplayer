@@ -114,13 +114,10 @@ export class SerpentSkinRenderer {
       ctx.globalAlpha = 0.65;
     }
 
-    // Ghost Hunt Spectral Phantom Aura
+    // Ghost Hunt Spectral Phantom Aura (2-pass stroke, 0 shadowBlur)
     if (snake.ghostHuntTimer > 0 && !snake.isDead) {
-      ctx.save();
-      ctx.shadowBlur = 28;
-      ctx.shadowColor = '#C77DFF';
-      ctx.strokeStyle = 'rgba(199, 125, 255, 0.7)';
-      ctx.lineWidth = snake.headRadius * 2.3;
+      ctx.strokeStyle = 'rgba(199, 125, 255, 0.25)';
+      ctx.lineWidth = snake.headRadius * 2.8;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -129,16 +126,16 @@ export class SerpentSkinRenderer {
         ctx.lineTo(body[i].x, body[i].y);
       }
       ctx.stroke();
-      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(199, 125, 255, 0.7)';
+      ctx.lineWidth = snake.headRadius * 2.1;
+      ctx.stroke();
     }
 
-    // Winner Golden Aura
+    // Winner Golden Aura (2-pass stroke, 0 shadowBlur)
     if (snake.isWinner) {
-      ctx.save();
-      ctx.shadowBlur = 35;
-      ctx.shadowColor = '#FFD700';
-      ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
-      ctx.lineWidth = snake.headRadius * 2.2;
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.25)';
+      ctx.lineWidth = snake.headRadius * 2.8;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -147,7 +144,10 @@ export class SerpentSkinRenderer {
         ctx.lineTo(body[i].x, body[i].y);
       }
       ctx.stroke();
-      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
+      ctx.lineWidth = snake.headRadius * 2.0;
+      ctx.stroke();
     }
 
     // 1. RENDER BODY SEGMENTS (Render from tail to head)
@@ -191,23 +191,24 @@ export class SerpentSkinRenderer {
   ): void {
     const body = snake.body;
 
-    // Outer glow for boost, overheat or normal snakes
-    if (snake.isOverheating) {
-      const pulse = Math.sin(gameTime * 15) * 0.3 + 0.7;
-      ctx.shadowBlur = 24 * pulse;
-      ctx.shadowColor = '#FF0055';
-    } else if (snake.isBoosting) {
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = skin.glowColor;
-    } else {
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = skin.glowColor;
+    // Single-pass underglow line for boosting / overheating snakes (replaces expensive per-segment shadowBlur)
+    if (snake.isOverheating || snake.isBoosting) {
+      const glowColor = snake.isOverheating ? 'rgba(255, 0, 85, 0.35)' : 'rgba(0, 245, 160, 0.3)';
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = snake.headRadius * 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(body[0].x, body[0].y);
+      for (let i = 1; i < totalSegments; i++) {
+        ctx.lineTo(body[i].x, body[i].y);
+      }
+      ctx.stroke();
     }
 
     // Render segments from tail (index totalSegments - 1) down to 1
     for (let i = totalSegments - 1; i >= 1; i--) {
       const seg = body[i];
-      const prevSeg = body[i - 1] || seg;
       const progress = i / totalSegments; // 0 (near head) to 1 (tail tip)
       const radius = seg.radius;
 
@@ -237,8 +238,6 @@ export class SerpentSkinRenderer {
 
       ctx.restore();
     }
-
-    ctx.shadowBlur = 0;
 
     // RENDER SPINAL CONDUIT / NEON RIDGE LINE
     this.renderSpinalRidge(ctx, snake, skin);
@@ -337,15 +336,15 @@ export class SerpentSkinRenderer {
     skin: SkinConfig,
     gameTime: number
   ): void {
-    // Ethereal outer nebula aura
-    const grad = ctx.createRadialGradient(0, 0, radius * 0.2, 0, 0, radius * 1.25);
-    grad.addColorStop(0, skin.headSecondary);
-    grad.addColorStop(0.6, skin.headPrimary);
-    grad.addColorStop(1, 'rgba(36, 0, 70, 0.2)');
-
+    // Ethereal outer nebula aura (layered fills instead of per-frame gradient allocation)
+    ctx.fillStyle = skin.headPrimary;
     ctx.beginPath();
     ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.fillStyle = skin.headSecondary;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.65, 0, Math.PI * 2);
     ctx.fill();
 
     // Translucent cosmic ring
@@ -406,21 +405,29 @@ export class SerpentSkinRenderer {
     gameTime: number
   ): void {
     const pulse = Math.sin(gameTime * 5 + index * 0.4) * 0.2 + 0.8;
+    const r = radius * pulse;
 
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-    grad.addColorStop(0, '#FFE600');
-    grad.addColorStop(0.4, skin.headSecondary);
-    grad.addColorStop(0.85, skin.headPrimary);
-    grad.addColorStop(1, '#330800');
-
+    // Outer magma layer
+    ctx.fillStyle = skin.headPrimary;
     ctx.beginPath();
-    ctx.arc(0, 0, radius * pulse, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mid molten orange layer
+    ctx.fillStyle = skin.headSecondary;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core solar yellow layer
+    ctx.fillStyle = '#FFE600';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
     ctx.fill();
 
     // Fiery obsidian magma crust
     ctx.strokeStyle = '#260400';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // Molten magma fissure crack
@@ -479,9 +486,14 @@ export class SerpentSkinRenderer {
     ctx.translate(head.x, head.y);
     ctx.rotate(snake.angle);
 
-    // Glowing head shadow
-    ctx.shadowBlur = snake.isBoosting ? 26 : 14;
-    ctx.shadowColor = skin.glowColor;
+    // Outer glow halo ring without shadowBlur
+    if (snake.isBoosting) {
+      ctx.strokeStyle = skin.glowColor;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     switch (snake.skin) {
       case 'synth': {
@@ -532,12 +544,12 @@ export class SerpentSkinRenderer {
         // Celestial Dragon Head with Crystal Crest
         ctx.beginPath();
         ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.2);
-        grad.addColorStop(0, '#FFFFFF');
-        grad.addColorStop(0.3, skin.headSecondary);
-        grad.addColorStop(0.8, skin.headPrimary);
-        grad.addColorStop(1, '#240046');
-        ctx.fillStyle = grad;
+        ctx.fillStyle = skin.headPrimary;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = skin.headSecondary;
         ctx.fill();
 
         // Starlight Horns
@@ -581,11 +593,12 @@ export class SerpentSkinRenderer {
         // Blazing Molten Skull
         ctx.beginPath();
         ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
-        const grad = ctx.createRadialGradient(r * 0.3, 0, 0, 0, 0, r * 1.2);
-        grad.addColorStop(0, '#FFE600');
-        grad.addColorStop(0.5, skin.headSecondary);
-        grad.addColorStop(1, '#590D00');
-        ctx.fillStyle = grad;
+        ctx.fillStyle = skin.headPrimary;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(r * 0.2, 0, r * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFE600';
         ctx.fill();
 
         // Flame crest spikes
@@ -716,11 +729,9 @@ export class SerpentSkinRenderer {
     ctx.save();
     ctx.translate(head.x, head.y + floatY);
 
-    // Crown Glow
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = '#FFD700';
-
-    ctx.fillStyle = '#FFD700';
+    // Crown Outer Glow Stroke (Zero shadowBlur)
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(-12, 6);
     ctx.lineTo(-14, -8);
@@ -730,6 +741,9 @@ export class SerpentSkinRenderer {
     ctx.lineTo(14, -8);
     ctx.lineTo(12, 6);
     ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFD700';
     ctx.fill();
 
     // Crown Jewels
@@ -769,11 +783,9 @@ export class SerpentSkinRenderer {
     }
     ctx.restore();
 
-    // Crown Intense Glow
-    ctx.shadowBlur = 24;
-    ctx.shadowColor = '#FFD700';
-
-    ctx.fillStyle = '#FFD700';
+    // Crown Golden Outer Stroke (Zero shadowBlur)
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+    ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(-16, 8);
     ctx.lineTo(-18, -12);
@@ -783,6 +795,9 @@ export class SerpentSkinRenderer {
     ctx.lineTo(18, -12);
     ctx.lineTo(16, 8);
     ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFD700';
     ctx.fill();
 
     // Inner Gold Highlights

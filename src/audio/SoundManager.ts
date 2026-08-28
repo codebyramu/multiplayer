@@ -2,8 +2,18 @@ import { SOUND_REGISTRY, MUSIC_REGISTRY, SoundEffectKey, MusicTrackKey, SoundEff
 
 // HYPERCADE Dynamic Procedural & Custom Web Audio Engine
 // Generates authentic 80s/90s arcade sound effects, chiptune beats, and supports custom MP3/WAV/OGG audio files.
+// Optimized for zero buffer underruns, sound clipping prevention, max 12 concurrent voices, and leak-free node disposal.
 
 export type MusicTrack = 'none' | 'lobby' | 'ingame' | 'final-duel';
+
+const MAX_SFX_VOICES = 12;
+
+interface ActiveVoice {
+  id: number;
+  nodes: AudioNode[];
+  cleanupTimer?: number;
+  stop: () => void;
+}
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -32,6 +42,16 @@ export class SoundManager {
   // Final duel acceleration state
   private duelIntensity: number = 1.0;
 
+  // Voice Management & Concurrency Limiting (Clamped to 12 Max)
+  private activeVoices: Set<ActiveVoice> = new Set();
+  private voiceCounter: number = 0;
+
+  // SFX Throttling to prevent audio node flood
+  private lastTriggerTimes: Map<string, number> = new Map();
+
+  // Window resume handlers tracking
+  private resumeHandlersAttached: boolean = false;
+
   constructor() {
     try {
       const savedMute = localStorage.getItem('hypercade_mute');
@@ -49,18 +69,38 @@ export class SoundManager {
       // Ignore SSR / blocked storage
     }
 
-    // Auto-resume on user interactions
-    if (typeof window !== 'undefined') {
-      const resumeAudio = () => {
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume();
-        }
-      };
-      window.addEventListener('click', resumeAudio, { once: false, passive: true });
-      window.addEventListener('keydown', resumeAudio, { once: false, passive: true });
-      window.addEventListener('touchstart', resumeAudio, { once: false, passive: true });
-    }
+    this.attachResumeListeners();
   }
+
+  private attachResumeListeners() {
+    if (typeof window === 'undefined' || this.resumeHandlersAttached) return;
+    window.addEventListener('click', this.handleUserInteraction, { passive: true });
+    window.addEventListener('keydown', this.handleUserInteraction, { passive: true });
+    window.addEventListener('touchstart', this.handleUserInteraction, { passive: true });
+    this.resumeHandlersAttached = true;
+  }
+
+  private detachResumeListeners() {
+    if (typeof window === 'undefined' || !this.resumeHandlersAttached) return;
+    window.removeEventListener('click', this.handleUserInteraction);
+    window.removeEventListener('keydown', this.handleUserInteraction);
+    window.removeEventListener('touchstart', this.handleUserInteraction);
+    this.resumeHandlersAttached = false;
+  }
+
+  private handleUserInteraction = () => {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().then(() => {
+          if (this.ctx && this.ctx.state === 'running') {
+            this.detachResumeListeners();
+          }
+        }).catch(() => {});
+      } else if (this.ctx.state === 'running') {
+        this.detachResumeListeners();
+      }
+    }
+  };
 
   // --- AUDIO CUSTOMIZATION & REGISTRY APIS --- //
 
@@ -170,6 +210,84 @@ export class SoundManager {
     }
   }
 
+  // --- CONCURRENT VOICE LIMITING & NODE DISPOSAL --- //
+
+  /**
+   * Registers an active sound effect voice and ensures total active voices
+   * never exceed MAX_SFX_VOICES (12). Disposes all intermediate audio nodes on finish.
+   */
+  private registerVoice(
+    nodes: AudioNode[],
+    durationMs: number,
+    onStopExtra?: () => void
+  ): ActiveVoice {
+    // If voice limit reached, preempt and disconnect the oldest voice
+    if (this.activeVoices.size >= MAX_SFX_VOICES) {
+      const oldest = this.activeVoices.values().next().value;
+      if (oldest) {
+        oldest.stop();
+      }
+    }
+
+    const voiceId = ++this.voiceCounter;
+    let isCleanedUp = false;
+
+    const cleanup = () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+
+      if (voice.cleanupTimer) {
+        clearTimeout(voice.cleanupTimer);
+        voice.cleanupTimer = undefined;
+      }
+      this.activeVoices.delete(voice);
+
+      if (onStopExtra) {
+        try {
+          onStopExtra();
+        } catch {}
+      }
+
+      // Disconnect and release all nodes in this voice
+      for (const node of nodes) {
+        try {
+          if ('stop' in node && typeof (node as any).stop === 'function') {
+            try {
+              (node as any).stop();
+            } catch {}
+          }
+          node.disconnect();
+        } catch {}
+      }
+    };
+
+    const voice: ActiveVoice = {
+      id: voiceId,
+      nodes,
+      stop: cleanup,
+    };
+
+    // Auto-cleanup after the duration + safety buffer
+    voice.cleanupTimer = window.setTimeout(cleanup, Math.max(25, durationMs + 35));
+    this.activeVoices.add(voice);
+
+    return voice;
+  }
+
+  /**
+   * SFX Rate Limiter / Throttling:
+   * Prevents audio node flood when e.g. 8 snakes collect pellets simultaneously in Serpent Arena.
+   */
+  private shouldThrottle(key: string, minIntervalMs: number = 30): boolean {
+    const now = performance.now();
+    const last = this.lastTriggerTimes.get(key) || 0;
+    if (now - last < minIntervalMs) {
+      return true;
+    }
+    this.lastTriggerTimes.set(key, now);
+    return false;
+  }
+
   // --- VOLUME CONTROLS & PERSISTENCE --- //
 
   public setMuted(muted: boolean) {
@@ -245,6 +363,59 @@ export class SoundManager {
     return this.currentTrack;
   }
 
+  // --- MATCH TRANSITION & LEAK CLEANUP API --- //
+
+  /**
+   * Completely stops and disposes all active SFX voices, disconnects gains,
+   * purges scheduled timers, and resets audio state on match/round transitions.
+   */
+  public stopAllSounds(): void {
+    // 1. Evict and clean up all active SFX voices
+    for (const voice of Array.from(this.activeVoices)) {
+      voice.stop();
+    }
+    this.activeVoices.clear();
+
+    // 2. Clear throttle timestamps
+    this.lastTriggerTimes.clear();
+
+    // 3. Stop any procedural music interval
+    if (this.musicInterval !== null) {
+      clearInterval(this.musicInterval);
+      this.musicInterval = null;
+    }
+
+    // 4. Disconnect and release track gain
+    if (this.currentTrackGainNode) {
+      try {
+        this.currentTrackGainNode.gain.cancelScheduledValues(0);
+        this.currentTrackGainNode.disconnect();
+      } catch {}
+      this.currentTrackGainNode = null;
+    }
+
+    // 5. Pause and reset custom music audio element
+    if (this.customMusicElement) {
+      try {
+        this.customMusicElement.pause();
+        this.customMusicElement.currentTime = 0;
+      } catch {}
+      this.customMusicElement = null;
+    }
+
+    // 6. Pause any cached custom sound elements
+    for (const audio of this.customAudioCache.values()) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {}
+    }
+  }
+
+  public reset(): void {
+    this.stopAllSounds();
+  }
+
   // --- DYNAMIC PROCEDURAL SYNTH MUSIC ENGINE --- //
 
   public playMusic(track: MusicTrack, fadeDuration: number = 0.8) {
@@ -271,6 +442,11 @@ export class SoundManager {
       this.customMusicElement.pause();
       this.customMusicElement.currentTime = 0;
       this.customMusicElement = null;
+    }
+
+    if (this.musicInterval !== null) {
+      clearInterval(this.musicInterval);
+      this.musicInterval = null;
     }
 
     this.currentTrack = track;
@@ -434,6 +610,13 @@ export class SoundManager {
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + duration);
   }
@@ -453,6 +636,13 @@ export class SoundManager {
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + duration);
   }
@@ -477,6 +667,14 @@ export class SoundManager {
     subOsc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        subOsc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     subOsc.start(time);
     osc.stop(time + duration);
@@ -500,6 +698,13 @@ export class SoundManager {
       osc.connect(filter);
       filter.connect(gain);
       gain.connect(dest);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          filter.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
       osc.start(time);
       osc.stop(time + duration);
     });
@@ -520,6 +725,13 @@ export class SoundManager {
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + 0.1);
   }
@@ -535,6 +747,12 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.22);
     osc.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + 0.22);
   }
@@ -563,6 +781,19 @@ export class SoundManager {
     toneGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
     osc.connect(toneGain);
     toneGain.connect(dest);
+    noise.onended = () => {
+      try {
+        noise.disconnect();
+        noiseFilter.disconnect();
+        noiseGain.disconnect();
+      } catch {}
+    };
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        toneGain.disconnect();
+      } catch {}
+    };
     noise.start(time);
     osc.start(time);
     noise.stop(time + 0.15);
@@ -584,6 +815,13 @@ export class SoundManager {
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    noise.onended = () => {
+      try {
+        noise.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     noise.start(time);
     noise.stop(time + 0.04);
   }
@@ -601,6 +839,12 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
     osc.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + 0.18);
   }
@@ -622,6 +866,13 @@ export class SoundManager {
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + duration);
   }
@@ -641,6 +892,13 @@ export class SoundManager {
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(time);
     osc.stop(time + 0.08);
   }
@@ -649,11 +907,13 @@ export class SoundManager {
 
   public playClick(pitch = 800) {
     if (this.isMuted) return;
+    if (this.shouldThrottle('click', 25)) return;
     const cfg = SOUND_REGISTRY['click'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'triangle';
@@ -663,12 +923,15 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 55);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.05);
   }
 
   public playCountdownPitch(step: 3 | 2 | 1 | 'go' | number | string) {
     if (this.isMuted) return;
+    if (this.shouldThrottle(`countdown_${step}`, 40)) return;
     const cfgBeep = SOUND_REGISTRY['countdownBeep'];
     const cfgGo = SOUND_REGISTRY['countdownGo'];
     if (step === 'go' && cfgGo?.file && this.playCustomAudio(cfgGo.file, cfgGo.volume)) return;
@@ -698,6 +961,7 @@ export class SoundManager {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55 + i * 0.03);
         osc.connect(gain);
         gain.connect(this.sfxGain);
+        this.registerVoice([osc, gain], (0.55 + i * 0.03) * 1000);
         osc.start(now);
         osc.stop(now + 0.55 + i * 0.03);
       });
@@ -716,6 +980,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+    this.registerVoice([osc, gain], duration * 1000);
     osc.start(time);
     osc.stop(time + duration);
   }
@@ -731,6 +996,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+    this.registerVoice([osc, gain], 420);
     osc.start(time);
     osc.stop(time + 0.4);
   }
@@ -739,13 +1005,19 @@ export class SoundManager {
     this.playCountdownPitch(isGo ? 'go' : 2);
   }
 
+  /**
+   * High-Performance Throttled Pellet / Item Pickup
+   * Clamped to prevent audio node buffer exhaustion when 8 snakes consume pellets at once.
+   */
   public playPickup(freq = 600) {
     if (this.isMuted) return;
+    if (this.shouldThrottle('pickup', 30)) return;
     const cfg = SOUND_REGISTRY['pickup'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sine';
@@ -755,17 +1027,21 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 110);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.1);
   }
 
   public playPowerup(pitch = 520) {
     if (this.isMuted) return;
+    if (this.shouldThrottle('powerup', 60)) return;
     const cfg = SOUND_REGISTRY['powerup'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const now = this.ctx.currentTime;
     const notes = [pitch, pitch * 1.25, pitch * 1.5, pitch * 2];
     notes.forEach((freq, idx) => {
@@ -778,6 +1054,7 @@ export class SoundManager {
       gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.15);
       osc.connect(gain);
       gain.connect(this.sfxGain);
+      this.registerVoice([osc, gain], (idx * 0.05 + 0.16) * 1000);
       osc.start(now + idx * 0.05);
       osc.stop(now + idx * 0.05 + 0.15);
     });
@@ -785,11 +1062,13 @@ export class SoundManager {
 
   public playBoost() {
     if (this.isMuted) return;
+    if (this.shouldThrottle('boost', 50)) return;
     const cfg = SOUND_REGISTRY['boost'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
@@ -799,17 +1078,69 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 220);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.2);
   }
 
+  public playJump() {
+    if (this.isMuted) return;
+    if (this.shouldThrottle('jump', 40)) return;
+    const cfg = SOUND_REGISTRY['jump'];
+    if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(720, this.ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.28 * (cfg?.volume ?? 1.0), this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.14);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 150);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.14);
+  }
+
+  public playNitro() {
+    if (this.isMuted) return;
+    if (this.shouldThrottle('nitro', 60)) return;
+    const cfg = SOUND_REGISTRY['nitro'];
+    if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(240, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.35 * (cfg?.volume ?? 1.0), this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.22);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 230);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.22);
+  }
+
   public playZap() {
     if (this.isMuted) return;
+    if (this.shouldThrottle('zap', 40)) return;
     const cfg = SOUND_REGISTRY['zap'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
@@ -819,17 +1150,21 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 160);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.15);
   }
 
   public playHit() {
     if (this.isMuted) return;
+    if (this.shouldThrottle('hit', 40)) return;
     const cfg = SOUND_REGISTRY['hit'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'triangle';
@@ -839,20 +1174,101 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.16);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 170);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.16);
   }
 
+  public playTackle() {
+    if (this.isMuted) return;
+    if (this.shouldThrottle('tackle', 50)) return;
+    const cfg = SOUND_REGISTRY['tackle'];
+    if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.45 * (cfg?.volume ?? 1.0), this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 210);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.2);
+  }
+
+  public playFreeze() {
+    if (this.isMuted) return;
+    if (this.shouldThrottle('freeze', 60)) return;
+    const cfg = SOUND_REGISTRY['freeze'];
+    if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(240, this.ctx.currentTime + 0.22);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.35 * (cfg?.volume ?? 1.0), this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.24);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, filter, gain], 250);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.24);
+  }
+
+  public playShockwave() {
+    if (this.isMuted) return;
+    if (this.shouldThrottle('shockwave', 60)) return;
+    const cfg = SOUND_REGISTRY['shockwave'];
+    if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.28);
+    gain.gain.setValueAtTime(0.48 * (cfg?.volume ?? 1.0), this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.32);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 330);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.32);
+  }
+
   public playElimination() {
     if (this.isMuted) return;
+    if (this.shouldThrottle('elimination', 80)) return;
     const cfg = SOUND_REGISTRY['elimination'];
     if (cfg?.file && this.playCustomAudio(cfg.file, cfg.volume)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const now = this.ctx.currentTime;
     const buffer = this.getNoiseBuffer(0.45);
     if (!buffer) return;
+
     const noise = this.ctx.createBufferSource();
     noise.buffer = buffer;
     const filter = this.ctx.createBiquadFilter();
@@ -865,6 +1281,7 @@ export class SoundManager {
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(this.sfxGain);
+
     const subOsc = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     subOsc.type = 'sine';
@@ -874,6 +1291,8 @@ export class SoundManager {
     subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
     subOsc.connect(subGain);
     subGain.connect(this.sfxGain);
+
+    this.registerVoice([noise, filter, gain, subOsc, subGain], 480);
     noise.start(now);
     subOsc.start(now);
     noise.stop(now + 0.45);
@@ -893,6 +1312,7 @@ export class SoundManager {
     stingerGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
     stingerOsc.connect(stingerGain);
     stingerGain.connect(this.sfxGain);
+    this.registerVoice([stingerOsc, stingerGain], 370);
     stingerOsc.start(now);
     stingerOsc.stop(now + 0.35);
   }
@@ -931,6 +1351,7 @@ export class SoundManager {
       osc.connect(gain);
       osc2.connect(gain);
       gain.connect(this.sfxGain);
+      this.registerVoice([osc, osc2, gain], (note.time + note.dur) * 1000);
       osc.start(now + note.time);
       osc2.start(now + note.time);
       osc.stop(now + note.time + note.dur);
@@ -956,6 +1377,7 @@ export class SoundManager {
       gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 0.35);
       osc.connect(gain);
       gain.connect(this.sfxGain);
+      this.registerVoice([osc, gain], (idx * 0.12 + 0.38) * 1000);
       osc.start(now + idx * 0.12);
       osc.stop(now + idx * 0.12 + 0.35);
     });
@@ -968,6 +1390,7 @@ export class SoundManager {
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
+
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
@@ -978,34 +1401,34 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.45);
     osc.connect(gain);
     gain.connect(this.sfxGain);
+
+    this.registerVoice([osc, gain], 470);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.45);
   }
 
   public playWheelTick(pitch = 1200) {
     if (this.isMuted) return;
+    if (this.shouldThrottle('wheelTick', 20)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
-
     osc.type = 'square';
     osc.frequency.setValueAtTime(pitch, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, this.ctx.currentTime + 0.03);
-
     gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.035);
-
     osc.connect(gain);
     gain.connect(this.sfxGain);
 
+    this.registerVoice([osc, gain], 45);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.035);
   }
 
-  // 11. Mystery Wheel Selection / Winner Ding
   public playWheelWinner() {
     if (this.isMuted) return;
     this.init();
@@ -1017,74 +1440,64 @@ export class SoundManager {
       if (!this.ctx || !this.sfxGain) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.06);
-
       gain.gain.setValueAtTime(0, this.ctx.currentTime);
       gain.gain.setValueAtTime(0.3, this.ctx.currentTime + idx * 0.06);
       gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.06 + 0.35);
-
       osc.connect(gain);
       gain.connect(this.sfxGain);
-
+      this.registerVoice([osc, gain], (idx * 0.06 + 0.38) * 1000);
       osc.start(this.ctx.currentTime + idx * 0.06);
       osc.stop(this.ctx.currentTime + idx * 0.06 + 0.35);
     });
   }
 
-  // 12. Tournament Point Tally / Chime
   public playPointTally(pitch = 880) {
     if (this.isMuted) return;
+    if (this.shouldThrottle('pointTally', 30)) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
-
     osc.type = 'sine';
     osc.frequency.setValueAtTime(pitch, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(pitch * 1.5, this.ctx.currentTime + 0.1);
-
     gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
-
     osc.connect(gain);
     gain.connect(this.sfxGain);
 
+    this.registerVoice([osc, gain], 160);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.15);
   }
 
-  // 13. Grand Crown Championship Fanfare
   public playGrandCrownFanfare() {
     if (this.isMuted) return;
     this.init();
     this.resume();
     if (!this.ctx || !this.sfxGain) return;
 
-    // Rich multi-stage heroic fanfare chords
-    const chord1 = [392.00, 523.25, 659.25]; // G4, C5, E5
-    const chord2 = [440.00, 554.37, 659.25]; // A4, C#5, E5
-    const chord3 = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 (Grand Finale)
+    const chord1 = [392.00, 523.25, 659.25];
+    const chord2 = [440.00, 554.37, 659.25];
+    const chord3 = [523.25, 659.25, 783.99, 1046.50];
 
     const scheduleChord = (chord: number[], startTime: number, duration: number) => {
       chord.forEach((freq) => {
         if (!this.ctx || !this.sfxGain) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(freq, this.ctx.currentTime + startTime);
-
         gain.gain.setValueAtTime(0, this.ctx.currentTime);
         gain.gain.setValueAtTime(0.22, this.ctx.currentTime + startTime);
         gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + startTime + duration);
-
         osc.connect(gain);
         gain.connect(this.sfxGain);
-
+        this.registerVoice([osc, gain], (startTime + duration) * 1000);
         osc.start(this.ctx.currentTime + startTime);
         osc.stop(this.ctx.currentTime + startTime + duration);
       });

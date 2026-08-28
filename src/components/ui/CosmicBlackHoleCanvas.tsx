@@ -30,21 +30,30 @@ export const CosmicBlackHoleCanvas: React.FC<CosmicBlackHoleCanvasProps> = ({ cu
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     let animId: number;
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
+    // Responsive / Device performance detection
+    const isMobile = window.innerWidth < 768 || ('ontouchstart' in window && window.innerWidth < 1024);
+    const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
+    const isLowEnd = isMobile || cores <= 4;
+    
+    // Adaptive particle target: 35 for mobile/low-end, 70 for mid-range, 120 for desktop
+    const targetParticleCount = isLowEnd ? (isMobile ? 35 : 55) : 110;
+    let activeParticleCount = targetParticleCount;
+
     const handleResize = () => {
       if (!canvas) return;
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
     };
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize, { passive: true });
 
-    // 140 Elegant, organic drifting stardust particles
+    // Elegant, organic drifting stardust particles
     const particles: AmbientDustParticle[] = [];
     const colors = [
       'rgba(0, 245, 160, ',   // Mint
@@ -55,9 +64,9 @@ export const CosmicBlackHoleCanvas: React.FC<CosmicBlackHoleCanvasProps> = ({ cu
       'rgba(255, 255, 255, ', // Pure Star
     ];
 
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < targetParticleCount; i++) {
       const colorPrefix = colors[i % colors.length];
-      const baseR = Math.random() * 1.8 + 0.8;
+      const baseR = Math.random() * 1.6 + 0.8;
       particles.push({
         x: Math.random() * width,
         y: Math.random() * height,
@@ -73,43 +82,65 @@ export const CosmicBlackHoleCanvas: React.FC<CosmicBlackHoleCanvasProps> = ({ cu
       });
     }
 
-    let frame = 0;
-    const render = () => {
-      frame++;
+    // Dynamic FPS Degradation Monitoring
+    let lastFrameTime = performance.now();
+    let slowFramesCount = 0;
+    let totalFramesSampled = 0;
+
+    const render = (currentTime: number) => {
+      const delta = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
+
+      // Low FPS detection: frame taking longer than 28ms (< 35 FPS)
+      if (delta > 28) {
+        slowFramesCount++;
+      }
+      totalFramesSampled++;
+
+      // Every 60 frames, evaluate performance and scale particles down if needed
+      if (totalFramesSampled >= 60) {
+        if (slowFramesCount > 18 && activeParticleCount > 25) {
+          activeParticleCount = Math.max(25, Math.floor(activeParticleCount * 0.7));
+        }
+        slowFramesCount = 0;
+        totalFramesSampled = 0;
+      }
+
       ctx.clearRect(0, 0, width, height);
 
       const targetX = cursorRef.current.x;
       const targetY = cursorRef.current.y;
-      const hasCursor = targetX > 0 && targetY > 0;
+      const hasCursor = targetX > 0 && targetY > 0 && !isMobile;
 
-      // Soft ambient cursor illumination (no spinning vortex)
+      // Soft ambient cursor illumination (only on desktop pointer devices)
       if (hasCursor) {
-        const radGrad = ctx.createRadialGradient(targetX, targetY, 0, targetX, targetY, 260);
-        radGrad.addColorStop(0, 'rgba(0, 245, 160, 0.08)');
-        radGrad.addColorStop(0.4, 'rgba(0, 229, 255, 0.04)');
-        radGrad.addColorStop(0.8, 'rgba(255, 178, 36, 0.015)');
+        const radGrad = ctx.createRadialGradient(targetX, targetY, 0, targetX, targetY, 240);
+        radGrad.addColorStop(0, 'rgba(0, 245, 160, 0.07)');
+        radGrad.addColorStop(0.4, 'rgba(0, 229, 255, 0.03)');
+        radGrad.addColorStop(0.8, 'rgba(255, 178, 36, 0.01)');
         radGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = radGrad;
         ctx.beginPath();
-        ctx.arc(targetX, targetY, 260, 0, Math.PI * 2);
+        ctx.arc(targetX, targetY, 240, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Render floating foreground particles
-      for (let i = 0; i < particles.length; i++) {
+      // Render floating foreground particles up to activeParticleCount
+      for (let i = 0; i < activeParticleCount; i++) {
         const p = particles[i];
 
         // Smooth organic drift
         p.x += p.vx;
         p.y += p.vy;
 
-        // Interactive subtle cursor repulsion (particles gently part away when mouse approaches)
+        // Interactive subtle cursor repulsion
         if (hasCursor) {
           const dx = p.x - targetX;
           const dy = p.y - targetY;
-          const dist = Math.hypot(dx, dy);
+          const distSq = dx * dx + dy * dy;
 
-          if (dist < 180 && dist > 1) {
+          if (distSq < 32400 && distSq > 1) { // 180px radius
+            const dist = Math.sqrt(distSq);
             const push = (180 - dist) / 180;
             p.x += (dx / dist) * push * 1.8;
             p.y += (dy / dist) * push * 1.8;
@@ -131,16 +162,13 @@ export const CosmicBlackHoleCanvas: React.FC<CosmicBlackHoleCanvasProps> = ({ cu
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fillStyle = `${p.color}${clampedAlpha})`;
-        ctx.shadowColor = `${p.color}0.8)`;
-        ctx.shadowBlur = 6;
         ctx.fill();
-        ctx.shadowBlur = 0;
       }
 
       animId = requestAnimationFrame(render);
     };
 
-    render();
+    animId = requestAnimationFrame(render);
 
     return () => {
       cancelAnimationFrame(animId);
@@ -152,6 +180,10 @@ export const CosmicBlackHoleCanvas: React.FC<CosmicBlackHoleCanvasProps> = ({ cu
     <canvas
       ref={canvasRef}
       className="fixed inset-0 pointer-events-none z-30 opacity-90"
+      style={{
+        willChange: 'transform',
+        transform: 'translateZ(0)',
+      }}
     />
   );
 };

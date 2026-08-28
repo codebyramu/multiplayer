@@ -1,6 +1,7 @@
 import { Peer, DataConnection } from 'peerjs';
-import { RoomState, Player, GameId, ControllerInput, GameEventPayload, MatchResults, TournamentMode } from '../types';
+import { RoomState, Player, GameId, ControllerInput, MatchResults } from '../types';
 import { LocalRoomEngine } from './LocalRoomEngine';
+import { inputSanitizer, decodeBinaryInput } from './InputSanitizer';
 
 type EventCallback = (...args: any[]) => void;
 
@@ -13,6 +14,8 @@ interface P2PMessage {
 export class P2PHostServer {
   private peer: Peer | null = null;
   private connections: Map<string, DataConnection> = new Map();
+  private peerToPlayerId: Map<string, string> = new Map();
+  public playerInputs: Record<string, ControllerInput> = {};
   private roomState: RoomState | null = null;
   private listeners: Map<string, Set<EventCallback>> = new Map();
   public partyCode: string = '';
@@ -72,9 +75,27 @@ export class P2PHostServer {
   private handleIncomingConnection(conn: DataConnection) {
     conn.on('open', () => {
       this.connections.set(conn.peer, conn);
+      if ((conn as any)?.dataChannel) {
+        try {
+          (conn as any).dataChannel.binaryType = 'arraybuffer';
+        } catch {}
+      }
     });
 
     conn.on('data', (raw: any) => {
+      // FAST PATH: Binary ArrayBuffer / compact TypedArray inputs
+      if (raw instanceof ArrayBuffer || ArrayBuffer.isView(raw) || Array.isArray(raw)) {
+        const playerId = this.peerToPlayerId.get(conn.peer);
+        if (playerId) {
+          const sanitized = inputSanitizer.sanitize(playerId, raw);
+          if (sanitized) {
+            this.playerInputs[playerId] = sanitized;
+            this.emitLocal('client-input', { playerId, input: sanitized });
+          }
+        }
+        return;
+      }
+
       try {
         const msg: P2PMessage = typeof raw === 'string' ? JSON.parse(raw) : raw;
         this.handleClientMessage(conn, msg);
@@ -98,6 +119,7 @@ export class P2PHostServer {
       case 'join-room': {
         const { name, avatar, color, skin } = msg.data || {};
         const playerId = `p_${conn.peer.slice(-6)}_${Date.now().toString().slice(-4)}`;
+        this.peerToPlayerId.set(conn.peer, playerId);
 
         const newPlayer: Player = {
           id: playerId,
@@ -154,9 +176,13 @@ export class P2PHostServer {
 
       case 'player-input': {
         const input: ControllerInput = msg.data;
-        const playerId = msg.senderId;
+        const playerId = msg.senderId || this.peerToPlayerId.get(conn.peer);
         if (playerId && input) {
-          this.emitLocal('client-input', { playerId, input });
+          const sanitized = inputSanitizer.sanitize(playerId, input);
+          if (sanitized) {
+            this.playerInputs[playerId] = sanitized;
+            this.emitLocal('client-input', { playerId, input: sanitized });
+          }
         }
         break;
       }
@@ -192,9 +218,15 @@ export class P2PHostServer {
 
   private handleClientDisconnect(peerId: string) {
     this.connections.delete(peerId);
+    const mappedPlayerId = this.peerToPlayerId.get(peerId);
+    this.peerToPlayerId.delete(peerId);
+    if (mappedPlayerId) {
+      delete this.playerInputs[mappedPlayerId];
+      inputSanitizer.resetPlayer(mappedPlayerId);
+    }
     if (!this.roomState) return;
 
-    let removedPlayerId: string | null = null;
+    let removedPlayerId: string | null = mappedPlayerId || null;
     for (const pid in this.roomState.players) {
       if (this.roomState.players[pid].socketId === peerId) {
         removedPlayerId = pid;

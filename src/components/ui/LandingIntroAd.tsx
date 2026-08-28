@@ -129,7 +129,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
     setStage('fading_out');
     setTimeout(() => {
       onEnter();
-    }, 1000);
+    }, 1200);
   };
 
   const handleTimeUpdate = () => {
@@ -158,7 +158,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
     <motion.div
       initial={{ opacity: 1 }}
       animate={{ opacity: stage === 'fading_out' ? 0 : 1 }}
-      transition={{ duration: 1.0, ease: 'easeInOut' }}
+      transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
       className="fixed inset-0 z-[250] bg-[#040508] flex flex-col justify-between items-center select-none overflow-hidden touch-none font-display text-white"
     >
       {/* ─── 1. FULLSCREEN VIDEO ELEMENT ─── */}
@@ -293,26 +293,6 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
               </motion.div>
             </AnimatePresence>
           </main>
-
-          {/* Bottom Progress Bar */}
-          <footer className="flex items-center justify-between border-t border-white/10 pt-3 text-xs font-mono text-white/60">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-arcade-mint" />
-              <span>WebRTC Direct Phone Controller</span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-mono text-white/50">
-                {Math.floor(currentTime)}s / 10s
-              </span>
-              <div className="w-32 sm:w-48 h-1.5 rounded-full bg-white/20 overflow-hidden relative">
-                <motion.div
-                  style={{ width: `${Math.min(100, (currentTime / 10.0) * 100)}%` }}
-                  className="h-full bg-gradient-to-r from-arcade-amber via-yellow-300 to-arcade-mint transition-all"
-                />
-              </div>
-            </div>
-          </footer>
         </div>
       )}
     </motion.div>
