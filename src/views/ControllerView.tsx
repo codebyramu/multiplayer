@@ -1,19 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Gamepad2,
-  Tv,
   Camera,
-  Check,
+  ChevronDown,
+  ChevronUp,
   Sparkles,
   Shuffle,
-  ChevronLeft,
-  ChevronRight,
-  Flame,
-  Volume2,
   AlertTriangle,
-  RotateCcw,
+  Check,
   Zap,
+  Gamepad2,
+  Tv,
 } from 'lucide-react';
 import { RoomState, ControllerInput, GameId, PlayerClientHUDState } from '../types';
 import { GAMES_DATA, PLAYER_AVATARS } from '../data/games';
@@ -38,7 +35,16 @@ interface ControllerViewProps {
   onReplayIntro?: () => void;
 }
 
-const COLOR_PALETTE = ['#00F5A0', '#00E5FF', '#FFB224', '#FF3366', '#9D4EDD', '#FF7700', '#3A86FF', '#E63946'];
+const COLOR_PALETTE = [
+  { id: 'mint', hex: '#00F5A0', name: 'Cyber Mint' },
+  { id: 'cyan', hex: '#00E5FF', name: 'Neon Cyan' },
+  { id: 'amber', hex: '#FFB224', name: 'Arcade Amber' },
+  { id: 'crimson', hex: '#FF3366', name: 'Laser Crimson' },
+  { id: 'violet', hex: '#9D4EDD', name: 'Void Violet' },
+  { id: 'orange', hex: '#FF7700', name: 'Solar Orange' },
+  { id: 'blue', hex: '#3A86FF', name: 'Quantum Blue' },
+  { id: 'rose', hex: '#FF007F', name: 'Hyper Rose' },
+];
 
 export const ControllerView: React.FC<ControllerViewProps> = ({
   initialCode,
@@ -56,7 +62,6 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
   const joinHandler = onJoin || onJoinParty || (async () => ({ success: false }));
   const leaveHandler = onLeave || onLeaveRoom || (() => {});
 
-  // If in a room, render waiting screen or arcade controller
   if (room) {
     const safePlayerId = playerId || Object.keys(room.players)[0] || '';
     if (room.state === 'lobby') {
@@ -83,25 +88,25 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
     );
   }
 
-  return <MinimalJoinScreen initialCode={initialCode} onJoinParty={joinHandler} />;
+  return <ThemedJoinScreen initialCode={initialCode} onJoinParty={joinHandler} />;
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   1. ULTRA-MINIMAL APPLE-GRADE JOIN SCREEN (ZERO ESSAY, 3 ROWS)
+   1. CYBERPUNK GLASSMORPHIC JOIN SCREEN WITH AVATAR GALLERY DROPDOWN
    ═══════════════════════════════════════════════════════════════ */
-const MinimalJoinScreen: React.FC<{
+const ThemedJoinScreen: React.FC<{
   initialCode?: string;
   onJoinParty: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
 }> = ({ initialCode, onJoinParty }) => {
   const [code, setCode] = useState(initialCode || '');
   const [name, setName] = useState('');
-  const [avatarIndex, setAvatarIndex] = useState(0);
-  const [colorIndex, setColorIndex] = useState(0);
+  const [selectedAvatarId, setSelectedAvatarId] = useState(PLAYER_AVATARS[0].id);
+  const [selectedColorHex, setSelectedColorHex] = useState(COLOR_PALETTE[0].hex);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
 
-  // Auto-fill party code from URL query ?join=CODE
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -112,23 +117,15 @@ const MinimalJoinScreen: React.FC<{
     } catch {}
   }, []);
 
-  const currentAvatar = PLAYER_AVATARS[avatarIndex % PLAYER_AVATARS.length];
-  const currentColor = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
+  const currentAvatar = PLAYER_AVATARS.find((a) => a.id === selectedAvatarId) || PLAYER_AVATARS[0];
+  const currentColorObj = COLOR_PALETTE.find((c) => c.hex === selectedColorHex) || COLOR_PALETTE[0];
 
   const handleRandomize = () => {
     soundManager.playClick(1050);
-    setAvatarIndex(Math.floor(Math.random() * PLAYER_AVATARS.length));
-    setColorIndex(Math.floor(Math.random() * COLOR_PALETTE.length));
-  };
-
-  const handleCycleColor = () => {
-    soundManager.playClick(950);
-    setColorIndex((prev) => (prev + 1) % COLOR_PALETTE.length);
-  };
-
-  const handleCycleAvatar = () => {
-    soundManager.playClick(850);
-    setAvatarIndex((prev) => (prev + 1) % PLAYER_AVATARS.length);
+    const randAvatar = PLAYER_AVATARS[Math.floor(Math.random() * PLAYER_AVATARS.length)];
+    const randColor = COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
+    setSelectedAvatarId(randAvatar.id);
+    setSelectedColorHex(randColor.hex);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -144,8 +141,8 @@ const MinimalJoinScreen: React.FC<{
     const res = await onJoinParty({
       code: code.trim().toUpperCase(),
       name: name.trim() || currentAvatar.name.split(' ')[0],
-      avatar: currentAvatar.id,
-      color: currentColor,
+      avatar: selectedAvatarId,
+      color: selectedColorHex,
       skin: 'synth',
     });
 
@@ -154,23 +151,26 @@ const MinimalJoinScreen: React.FC<{
   };
 
   return (
-    <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none">
+    <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none relative z-10 font-display">
+      {/* Background Neon Ambient Glows matching Website Theme */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,245,160,0.12)_0%,rgba(157,78,221,0.08)_40%,transparent_70%)] pointer-events-none" />
+
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="w-full max-w-sm rounded-3xl bg-black/60 border border-white/15 backdrop-blur-2xl p-6 sm:p-7 shadow-[0_0_60px_rgba(0,245,160,0.15)] space-y-5"
+        className="w-full max-w-md rounded-3xl bg-[#090A14]/85 border-2 border-white/15 backdrop-blur-2xl p-6 sm:p-8 shadow-[0_0_80px_rgba(0,245,160,0.18)] space-y-6 relative overflow-hidden"
       >
         {/* Header Branding */}
-        <div className="text-center space-y-1">
-          <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-white/5 border border-white/10 text-xl shadow-lg mx-auto">
+        <div className="text-center space-y-1.5 border-b border-white/10 pb-4">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-arcade-mint/15 border border-arcade-mint/40 text-2xl shadow-glow-mint mx-auto">
             👑
           </div>
           <h2 className="font-arcade text-xl sm:text-2xl font-black tracking-wider text-white">
-            JOIN PARTY
+            JOIN ARCADE PARTY
           </h2>
-          <p className="font-mono text-[11px] text-white/50 uppercase tracking-widest">
-            INSTANT PHONE GAMEPAD
+          <p className="font-mono text-[11px] text-arcade-mint uppercase tracking-widest font-bold">
+            WIRELESS CONTROLLER PAIRING
           </p>
         </div>
 
@@ -179,103 +179,212 @@ const MinimalJoinScreen: React.FC<{
           <motion.div
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-400 text-xs font-mono flex items-center gap-2"
+            className="p-3 rounded-2xl bg-red-500/15 border border-red-500/40 text-red-400 text-xs font-mono flex items-center gap-2"
           >
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span className="truncate">{error}</span>
           </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {/* 1. Party Code Input with Built-In Camera Scanner Icon */}
-          <div className="relative">
-            <input
-              type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="PARTY CODE (ON TV)"
-              maxLength={7}
-              required
-              className="w-full pl-4 pr-12 py-3.5 rounded-2xl bg-white/5 border border-white/15 text-center font-arcade text-xl tracking-widest text-arcade-amber placeholder:text-white/30 placeholder:font-mono placeholder:text-xs placeholder:tracking-normal uppercase focus:outline-none focus:border-arcade-amber shadow-inner"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                soundManager.playClick(900);
-                setShowScanner(true);
-              }}
-              title="Scan QR Code on TV"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-white/10 hover:bg-white/20 text-arcade-cyan border border-white/10 active:scale-95 transition-all"
-            >
-              <Camera className="w-4 h-4" />
-            </button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* 1. Party Code with Camera Scanner Action */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
+              PARTY CODE (DISPLAYED ON TV)
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                placeholder="e.g. HYP42"
+                maxLength={7}
+                required
+                className="w-full pl-4 pr-12 py-3.5 rounded-2xl bg-black/60 border-2 border-white/15 text-center font-arcade text-2xl tracking-widest text-arcade-amber placeholder:text-white/20 uppercase focus:outline-none focus:border-arcade-amber shadow-inner"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playClick(900);
+                  setShowScanner(true);
+                }}
+                title="Scan QR Code on TV"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-arcade-cyan/20 hover:bg-arcade-cyan/30 text-arcade-cyan border border-arcade-cyan/50 active:scale-95 transition-all shadow-glow-cyan"
+              >
+                <Camera className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* 2. Pilot Name Input */}
-          <div>
+          {/* 2. Pilot Name */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
+              PILOT HANDLE
+            </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="PILOT NAME"
+              placeholder="e.g. CyberViper"
               maxLength={14}
-              className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/15 text-center font-display text-sm tracking-wide text-white placeholder:text-white/30 focus:outline-none focus:border-arcade-mint"
+              className="w-full px-4 py-3 rounded-2xl bg-black/50 border-2 border-white/15 text-center font-display text-sm tracking-wide text-white placeholder:text-white/30 focus:outline-none focus:border-arcade-mint"
             />
           </div>
 
-          {/* 3. Compact 1-Tap Avatar & Color Cycler Pill */}
-          <div className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white/5 border border-white/10">
-            {/* Tap Avatar to Cycle Character */}
+          {/* 3. Interactive Avatar & Color Customization Trigger Button */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-mono text-white/50 uppercase tracking-wider font-bold">
+                PILOT AVATAR & AURA COLOR
+              </label>
+              <button
+                type="button"
+                onClick={handleRandomize}
+                className="text-[10px] font-mono text-arcade-amber hover:underline flex items-center gap-1"
+              >
+                <Shuffle className="w-3 h-3" />
+                <span>RANDOMIZE</span>
+              </button>
+            </div>
+
+            {/* Selected Avatar Pill (Clicking opens the interactive gallery dropdown) */}
             <button
               type="button"
-              onClick={handleCycleAvatar}
-              className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex-1 min-w-0"
-              title="Tap to change avatar"
+              onClick={() => {
+                soundManager.playClick(900);
+                setIsGalleryOpen(!isGalleryOpen);
+              }}
+              className="w-full p-2.5 rounded-2xl bg-black/60 border-2 border-white/15 hover:border-arcade-mint/50 transition-all flex items-center justify-between gap-3 shadow-md"
             >
-              <CuteCharacter
-                avatar={currentAvatar.id}
-                color={currentColor}
-                size={34}
-                mood="happy"
-              />
-              <span className="font-mono text-xs text-white font-bold truncate">
-                {currentAvatar.name.split(' ')[0]}
-              </span>
+              <div className="flex items-center gap-3">
+                <div
+                  className="p-1 rounded-xl border shadow-lg"
+                  style={{ borderColor: selectedColorHex, backgroundColor: `${selectedColorHex}25` }}
+                >
+                  <CuteCharacter
+                    avatar={selectedAvatarId}
+                    color={selectedColorHex}
+                    size={36}
+                    mood="happy"
+                  />
+                </div>
+                <div className="text-left">
+                  <div className="font-arcade text-xs text-white flex items-center gap-1.5">
+                    <span>{currentAvatar.name}</span>
+                  </div>
+                  <span className="font-mono text-[10px] text-white/50 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: selectedColorHex }} />
+                    {currentColorObj.name}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-arcade-mint font-mono text-xs pr-2">
+                <span>{isGalleryOpen ? 'CLOSE' : 'CUSTOMIZE'}</span>
+                {isGalleryOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </div>
             </button>
 
-            {/* Tap Color Aura to Cycle Color Palette */}
-            <button
-              type="button"
-              onClick={handleCycleColor}
-              style={{ backgroundColor: currentColor }}
-              className="w-7 h-7 rounded-full ring-2 ring-white/40 shadow-lg shrink-0 hover:scale-110 active:scale-90 transition-transform"
-              title="Tap to cycle color"
-            />
+            {/* 4. Interactive Expandable Gallery Dropdown */}
+            <AnimatePresence>
+              {isGalleryOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden pt-2"
+                >
+                  <div className="p-4 rounded-2xl bg-black/80 border-2 border-arcade-mint/30 space-y-4 shadow-2xl">
+                    {/* Character Avatars Gallery Grid */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-mono text-white/60 uppercase font-bold">
+                        1. SELECT CHARACTER (8 PILOTS)
+                      </span>
+                      <div className="grid grid-cols-4 gap-2">
+                        {PLAYER_AVATARS.map((av) => {
+                          const isSelected = selectedAvatarId === av.id;
+                          return (
+                            <button
+                              key={av.id}
+                              type="button"
+                              onClick={() => {
+                                soundManager.playClick(950);
+                                setSelectedAvatarId(av.id);
+                              }}
+                              className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                                isSelected
+                                  ? 'border-arcade-mint bg-arcade-mint/20 text-arcade-mint shadow-glow-mint scale-105'
+                                  : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20'
+                              }`}
+                            >
+                              <CuteCharacter
+                                avatar={av.id}
+                                color={isSelected ? selectedColorHex : '#888888'}
+                                size={32}
+                                mood={isSelected ? 'happy' : 'idle'}
+                              />
+                              <span className="text-[9px] font-mono truncate w-full text-center">
+                                {av.name.split(' ')[0]}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-            {/* Randomize Dice */}
-            <button
-              type="button"
-              onClick={handleRandomize}
-              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 shrink-0 active:scale-90 transition-all"
-              title="Randomize avatar & color"
-            >
-              <Shuffle className="w-4 h-4" />
-            </button>
+                    {/* Hologram Aura Colors Grid */}
+                    <div className="space-y-1.5 border-t border-white/10 pt-3">
+                      <span className="text-[10px] font-mono text-white/60 uppercase font-bold">
+                        2. SELECT AURA COLOR (8 NEON HUES)
+                      </span>
+                      <div className="grid grid-cols-4 gap-2">
+                        {COLOR_PALETTE.map((c) => {
+                          const isSelected = selectedColorHex === c.hex;
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                soundManager.playClick(1050);
+                                setSelectedColorHex(c.hex);
+                              }}
+                              className={`p-1.5 rounded-xl border flex items-center gap-2 transition-all ${
+                                isSelected
+                                  ? 'border-white bg-white/15 shadow-lg scale-102'
+                                  : 'border-white/10 bg-white/5 hover:border-white/20'
+                              }`}
+                            >
+                              <span
+                                className="w-5 h-5 rounded-full ring-1 ring-white/30 shrink-0"
+                                style={{ backgroundColor: c.hex }}
+                              />
+                              <span className="text-[9px] font-mono text-white/80 truncate">
+                                {c.name.split(' ')[1] || c.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* 4. Action Button */}
+          {/* 5. Connect Controller Button */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
             type="submit"
             disabled={isJoining}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-arcade-cyan via-teal-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_30px_rgba(0,229,255,0.5)] border border-white/40 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-arcade-cyan via-teal-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_35px_rgba(0,229,255,0.6)] border-2 border-white/40 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 mt-2"
           >
-            {isJoining ? 'CONNECTING...' : 'JOIN PARTY ▶'}
+            {isJoining ? 'SYNCHRONIZING...' : 'CONNECT CONTROLLER ▶'}
           </motion.button>
         </form>
 
-        {/* In-App Camera QR Scanner Modal */}
+        {/* QR Scanner Modal */}
         <QRScannerModal
           isOpen={showScanner}
           onClose={() => setShowScanner(false)}
@@ -321,7 +430,7 @@ const LobbyScreen: React.FC<{
 
   return (
     <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-sm rounded-3xl bg-black/60 border border-white/15 backdrop-blur-2xl p-6 space-y-5 shadow-2xl">
+      <div className="w-full max-w-sm rounded-3xl bg-[#090A14]/85 border-2 border-white/15 backdrop-blur-2xl p-6 space-y-5 shadow-2xl">
         {/* Contender Header */}
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center gap-3">
@@ -369,7 +478,6 @@ const LobbyScreen: React.FC<{
           </p>
         </div>
 
-        {/* Ready Action Hint */}
         <p className="text-center font-mono text-[11px] text-white/50">
           Raise your status on phone. Match begins when all pilots are ready on TV.
         </p>
@@ -526,7 +634,6 @@ const ArcadeController: React.FC<{
             onPointerCancel={onPointerUp}
             className="w-40 h-40 rounded-full bg-white/5 border-2 border-white/20 relative flex items-center justify-center shadow-[0_0_40px_rgba(0,245,160,0.15)] active:border-arcade-mint transition-colors"
           >
-            {/* Center Thumb Knob */}
             <motion.div
               style={{
                 transform: `translate(${stickPos.x}px, ${stickPos.y}px)`,
