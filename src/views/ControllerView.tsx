@@ -52,6 +52,7 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
   initialCode,
   room,
   playerId,
+  inGame,
   gameId,
   hudState,
   allHudStates,
@@ -66,7 +67,7 @@ export const ControllerView: React.FC<ControllerViewProps> = ({
 
   if (room) {
     const safePlayerId = playerId || Object.keys(room.players)[0] || '';
-    if (room.state === 'lobby') {
+    if (room.state === 'lobby' && !inGame) {
       return (
         <LobbyScreen
           room={room}

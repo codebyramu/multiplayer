@@ -353,15 +353,20 @@ export const App: React.FC = () => {
         const firstGame = state.gameSequence[0];
         setRoom((prev) => (prev ? { ...prev, selectedGame: firstGame } : prev));
         socketClient.selectGame(firstGame);
+        p2pHostServer.selectGame(firstGame);
       }
     }
     socketClient.startCountdown();
+    p2pHostServer.startCountdown();
+    setRoom((prev) => (prev ? { ...prev, state: 'countdown' } : prev));
     setMatchState('countdown');
   };
 
   // 7. COUNTDOWN COMPLETED
   const handleCountdownComplete = () => {
     socketClient.startGame();
+    p2pHostServer.startGame();
+    setRoom((prev) => (prev ? { ...prev, state: 'playing' } : prev));
     setMatchState('playing');
   };
 
@@ -369,6 +374,8 @@ export const App: React.FC = () => {
   const handleMatchEnd = (results: MatchResults) => {
     setMatchResults(results);
     socketClient.endGame(results);
+    p2pHostServer.endGame(results);
+    setRoom((prev) => (prev ? { ...prev, state: 'results' } : prev));
 
     // If active tournament, compute cumulative tournament standings
     if (tournamentMode !== 'single' && playlistSequence.length > 1) {
@@ -392,12 +399,14 @@ export const App: React.FC = () => {
     if (next && room) {
       const nextGame = next.nextGame;
       setTournamentState(tournamentEngine.getState());
-      setRoom((prev) => (prev ? { ...prev, selectedGame: nextGame } : prev));
+      setRoom((prev) => (prev ? { ...prev, selectedGame: nextGame, state: 'countdown' } : prev));
       socketClient.selectGame(nextGame);
+      p2pHostServer.selectGame(nextGame);
       setShowTournamentLeaderboard(false);
       setMatchResults(null);
       setMatchState('countdown');
       socketClient.startCountdown();
+      p2pHostServer.startCountdown();
     }
   };
 
@@ -408,12 +417,14 @@ export const App: React.FC = () => {
     const newState = tournamentEngine.initTournament(tournamentMode, room.players, playlistSequence);
     setTournamentState(newState);
     const firstGame = newState.gameSequence[0];
-    setRoom((prev) => (prev ? { ...prev, selectedGame: firstGame } : prev));
+    setRoom((prev) => (prev ? { ...prev, selectedGame: firstGame, state: 'countdown' } : prev));
     socketClient.selectGame(firstGame);
+    p2pHostServer.selectGame(firstGame);
     setShowTournamentLeaderboard(false);
     setMatchResults(null);
     setMatchState('countdown');
     socketClient.startCountdown();
+    p2pHostServer.startCountdown();
   };
 
   // 12. PLAY AGAIN (SINGLE MATCH)
@@ -421,7 +432,9 @@ export const App: React.FC = () => {
     soundManager.stopAllSounds();
     setMatchResults(null);
     setMatchState('countdown');
+    setRoom((prev) => (prev ? { ...prev, state: 'countdown' } : prev));
     socketClient.startCountdown();
+    p2pHostServer.startCountdown();
   };
 
   // 13. RETURN TO LOBBY
@@ -432,7 +445,9 @@ export const App: React.FC = () => {
     setTournamentState(null);
     tournamentEngine.reset();
     setMatchState('lobby');
+    setRoom((prev) => (prev ? { ...prev, state: 'lobby' } : prev));
     socketClient.returnToLobby();
+    p2pHostServer.returnToLobby();
   };
 
   // 14. LEAVE / BACK TO HUB
@@ -481,6 +496,18 @@ export const App: React.FC = () => {
         p2pClient.on('game-started', ({ room }) => {
           setRoom(room);
           setMatchState('playing');
+        });
+        p2pClient.on('sync-game-state', (payload: any) => {
+          if (payload?.hud) {
+            setAllHudStates((prev) => ({ ...prev, ...payload.hud }));
+            const myPid = p2pRes.playerId || '';
+            if (myPid && payload.hud[myPid]) {
+              setHudState(payload.hud[myPid]);
+            }
+          }
+          if (payload?.room) {
+            setRoom(payload.room);
+          }
         });
         p2pClient.on('game-ended', ({ results }) => {
           setMatchResults(results);
