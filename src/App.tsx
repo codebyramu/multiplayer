@@ -19,14 +19,8 @@ import { ProfileView } from './views/ProfileView';
 import { LandingIntroAd } from './components/ui/LandingIntroAd';
 
 export const App: React.FC = () => {
-  // Landing Intro State
-  const [showLandingIntro, setShowLandingIntro] = useState<boolean>(() => {
-    try {
-      return !sessionStorage.getItem('hypercade_visited');
-    } catch {
-      return true;
-    }
-  });
+  // Always show the full landing page presentation on reload
+  const [showLandingIntro, setShowLandingIntro] = useState<boolean>(true);
 
   // Navigation
   const [currentTab, setCurrentTab] = useState<'hub' | 'host' | 'join' | 'leaderboards' | 'profile'>('hub');

@@ -35,14 +35,18 @@ export class VoidTagBotAI {
       };
     }
 
-    const diff =
+    const diff: 'easy' | 'medium' | 'hard' =
       config.difficulty === 'easy'
         ? 'easy'
         : config.difficulty === 'hard' || config.difficulty === 'extreme'
         ? 'hard'
         : 'medium';
 
-    const decisionInterval = diff === 'easy' ? 0.22 : diff === 'medium' ? 0.08 : 0;
+    // Difficulty Decision Interval:
+    // Easy: slower reaction times (0.2-0.35s)
+    // Medium: balanced reactions (0.08-0.12s)
+    // Hard: razor-sharp reactions (0.01-0.03s)
+    const decisionInterval = diff === 'easy' ? 0.25 : diff === 'medium' ? 0.10 : 0.02;
 
     if (!this.botStates[bot.id]) {
       this.botStates[bot.id] = {
@@ -62,12 +66,12 @@ export class VoidTagBotAI {
     const state = this.botStates[bot.id];
     state.timer += dt;
 
-    if (decisionInterval === 0 || state.timer >= decisionInterval) {
+    if (state.timer >= decisionInterval) {
       state.timer = 0;
       if (bot.isHunter) {
-        state.cachedInput = this.computeHunterInput(bot, allPlayers, sanctuaries, nebulae, debris, config);
+        state.cachedInput = this.computeHunterInput(bot, allPlayers, sanctuaries, nebulae, debris, config, diff);
       } else {
-        state.cachedInput = this.computeSurvivorInput(bot, allPlayers, sanctuaries, nebulae, debris, config);
+        state.cachedInput = this.computeSurvivorInput(bot, allPlayers, sanctuaries, nebulae, debris, config, diff);
       }
     }
 
@@ -83,7 +87,8 @@ export class VoidTagBotAI {
     sanctuaries: SanctuaryZone[],
     nebulae: NebulaZone[],
     debris: SpaceDebris[],
-    config: VoidTagEngineConfig
+    config: VoidTagEngineConfig,
+    difficulty: 'easy' | 'medium' | 'hard' = 'medium'
   ): ControllerInput {
     const survivors = Object.values(allPlayers).filter(p => !p.isHunter && !p.isEliminated);
     const otherHunters = Object.values(allPlayers).filter(p => p.isHunter && p.id !== hunter.id);
@@ -145,7 +150,8 @@ export class VoidTagBotAI {
 
     if (!isPrimaryChaser && distToTarget > 140) {
       // Flanking behavior: Lead the target by predicting trajectory + cutting off nearest sanctuary
-      const leadTime = Math.min(1.2, distToTarget / Math.max(1, config.baseHunterSpeed));
+      const leadMultiplier = difficulty === 'hard' ? 1.4 : difficulty === 'easy' ? 0.6 : 1.0;
+      const leadTime = Math.min(1.2, (distToTarget / Math.max(1, config.baseHunterSpeed)) * leadMultiplier);
       targetX += targetSurvivor.vx * leadTime;
       targetY += targetSurvivor.vy * leadTime;
 
@@ -181,8 +187,14 @@ export class VoidTagBotAI {
       steerY /= steerLen;
     }
 
+    // Easy wandering perturbation
+    if (difficulty === 'easy') {
+      steerX += Math.cos(Date.now() * 0.003) * 0.25;
+      steerY += Math.sin(Date.now() * 0.003) * 0.25;
+    }
+
     // 4. Obstacle Avoidance (Space Debris & Sanctuary Repulsion if active)
-    const avoidance = this.computeObstacleAvoidance(hunter, debris, sanctuaries, steerX, steerY);
+    const avoidance = this.computeObstacleAvoidance(hunter, debris, sanctuaries, steerX, steerY, difficulty);
     steerX += avoidance.x * 1.6;
     steerY += avoidance.y * 1.6;
 
@@ -202,7 +214,7 @@ export class VoidTagBotAI {
     const action2 = false; // Hunters don't use EMP
 
     // Use Dash when closing in on a survivor in line of sight
-    if (hunter.dashCooldown <= 0 && distToTarget > 110 && distToTarget < 260) {
+    if (hunter.dashCooldown <= 0 && distToTarget > 110 && distToTarget < (difficulty === 'hard' ? 280 : 250)) {
       // Check angle alignment
       const angleToTarget = Math.atan2(targetSurvivor.y - hunter.y, targetSurvivor.x - hunter.x);
       const angleDiff = Math.abs(this.normalizeAngle(hunter.angle - angleToTarget));
@@ -210,8 +222,13 @@ export class VoidTagBotAI {
       // Line of sight check through debris
       const hasLOS = this.hasLineOfSight(hunter.x, hunter.y, targetSurvivor.x, targetSurvivor.y, debris);
 
-      if (angleDiff < 0.55 && hasLOS) {
-        action1 = true;
+      if (angleDiff < (difficulty === 'hard' ? 0.65 : 0.50) && hasLOS) {
+        if (difficulty === 'easy') {
+          // Easy: 20% dash chance
+          action1 = Math.random() < 0.20;
+        } else {
+          action1 = true;
+        }
       }
     }
 
@@ -235,7 +252,8 @@ export class VoidTagBotAI {
     sanctuaries: SanctuaryZone[],
     nebulae: NebulaZone[],
     debris: SpaceDebris[],
-    config: VoidTagEngineConfig
+    config: VoidTagEngineConfig,
+    difficulty: 'easy' | 'medium' | 'hard' = 'medium'
   ): ControllerInput {
     const hunters = Object.values(allPlayers).filter(p => p.isHunter && !p.isEliminated);
     const archetype = survivor.botArchetype || 'defensive';
@@ -259,7 +277,7 @@ export class VoidTagBotAI {
 
       // Stunned hunters pose much lower immediate threat
       const stunMultiplier = hunter.isStunned ? 0.15 : 1.0;
-      const dangerThreshold = 480;
+      const dangerThreshold = difficulty === 'hard' ? 520 : difficulty === 'easy' ? 400 : 480;
 
       if (dist < dangerThreshold) {
         const weight = (1 - dist / dangerThreshold) * stunMultiplier;
@@ -366,20 +384,26 @@ export class VoidTagBotAI {
       }
     }
 
+    // Easy wandering perturbation
+    if (difficulty === 'easy') {
+      steerX += Math.cos(Date.now() * 0.003) * 0.3;
+      steerY += Math.sin(Date.now() * 0.003) * 0.3;
+    }
+
     // If no threat and no active goal, patrol/wander
     if (totalThreatWeight < 0.1 && !hasGoal) {
       steerX = Math.cos(survivor.angle + 0.05);
       steerY = Math.sin(survivor.angle + 0.05);
     }
 
-    // 5. Line-of-Sight Break using Space Debris
-    if (closestHunter && closestHunterDist < 300) {
+    // 5. Line-of-Sight Break using Space Debris (Hard and Medium)
+    if (closestHunter && closestHunterDist < 320 && difficulty !== 'easy') {
       for (const deb of debris) {
         const dSurvivor = Math.hypot(deb.x - survivor.x, deb.y - survivor.y);
         const dHunter = Math.hypot(deb.x - closestHunter.x, deb.y - closestHunter.y);
 
         // If debris is roughly between hunter and survivor
-        if (dSurvivor < 220 && dHunter > dSurvivor) {
+        if (dSurvivor < 240 && dHunter > dSurvivor) {
           // Steer behind the debris
           const behindX = deb.x + (deb.x - closestHunter.x) / Math.max(1, dHunter) * (deb.radius + 35);
           const behindY = deb.y + (deb.y - closestHunter.y) / Math.max(1, dHunter) * (deb.radius + 35);
@@ -387,15 +411,15 @@ export class VoidTagBotAI {
           const dy = behindY - survivor.y;
           const len = Math.hypot(dx, dy);
           if (len > 0.001) {
-            steerX += (dx / len) * 1.4;
-            steerY += (dy / len) * 1.4;
+            steerX += (dx / len) * (difficulty === 'hard' ? 1.8 : 1.4);
+            steerY += (dy / len) * (difficulty === 'hard' ? 1.8 : 1.4);
           }
         }
       }
     }
 
     // 6. Obstacle Avoidance (don't ram debris head-on)
-    const avoidance = this.computeObstacleAvoidance(survivor, debris, sanctuaries, steerX, steerY);
+    const avoidance = this.computeObstacleAvoidance(survivor, debris, sanctuaries, steerX, steerY, difficulty);
     steerX += avoidance.x * 1.5;
     steerY += avoidance.y * 1.5;
 
@@ -424,17 +448,27 @@ export class VoidTagBotAI {
         !closestHunter.isStunned &&
         !closestHunter.isInvulnerable
       ) {
-        action2 = true;
+        if (difficulty === 'easy') {
+          // Easy: 20% EMP chance
+          action2 = Math.random() < 0.20;
+        } else {
+          action2 = true;
+        }
       }
 
       // Phase Dash Trigger: Emergency blink when hunter is in critical tag proximity (< 130px)
       if (
         survivor.dashCooldown <= 0 &&
-        closestHunterDist < 135 &&
+        closestHunterDist < (difficulty === 'hard' ? 145 : 135) &&
         !closestHunter.isStunned &&
         isApproaching
       ) {
-        action1 = true;
+        if (difficulty === 'easy') {
+          // Easy: 20% dash chance
+          action1 = Math.random() < 0.20;
+        } else {
+          action1 = true;
+        }
       }
     }
 
@@ -457,17 +491,20 @@ export class VoidTagBotAI {
     debris: SpaceDebris[],
     sanctuaries: SanctuaryZone[],
     dirX: number,
-    dirY: number
+    dirY: number,
+    difficulty: 'easy' | 'medium' | 'hard' = 'medium'
   ): { x: number; y: number } {
     let avoidX = 0;
     let avoidY = 0;
+
+    const extraBuffer = difficulty === 'easy' ? 45 : difficulty === 'hard' ? 15 : 30;
 
     // Debris avoidance
     for (const deb of debris) {
       const dx = entity.x - deb.x;
       const dy = entity.y - deb.y;
       const dist = Math.hypot(dx, dy);
-      const safeRadius = deb.radius + entity.radius + 35;
+      const safeRadius = deb.radius + entity.radius + extraBuffer;
 
       if (dist < safeRadius && dist > 0.001) {
         const force = (safeRadius - dist) / safeRadius;
@@ -489,7 +526,7 @@ export class VoidTagBotAI {
           const dx = entity.x - sanc.x;
           const dy = entity.y - sanc.y;
           const dist = Math.hypot(dx, dy);
-          const safeRadius = sanc.radius + entity.radius + 10;
+          const safeRadius = sanc.radius + entity.radius + (difficulty === 'easy' ? 20 : difficulty === 'hard' ? 5 : 10);
 
           if (dist < safeRadius && dist > 0.001) {
             const force = (safeRadius - dist) / safeRadius;

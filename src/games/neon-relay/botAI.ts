@@ -62,8 +62,15 @@ export class BotAIController {
     const normY = tangentX / tangentLen;
 
     // Adjust lane offset dynamically per archetype and difficulty
+    // Easy bots wander across the track with slight sinusoidal wave
     // Hard bots stick tightly to the apex / optimal line
-    const effectiveLaneOffset = difficulty === 'hard' ? state.laneOffset * 0.35 : state.laneOffset;
+    const wanderOffset = difficulty === 'easy' ? Math.sin((bot.x + bot.y) * 0.005) * 18 : 0;
+    const effectiveLaneOffset =
+      difficulty === 'hard'
+        ? state.laneOffset * 0.3
+        : difficulty === 'easy'
+        ? (state.laneOffset + wanderOffset) * 1.25
+        : state.laneOffset;
     let targetX = baseTarget.x + normX * effectiveLaneOffset;
     let targetY = baseTarget.y + normY * effectiveLaneOffset;
 
@@ -142,10 +149,10 @@ export class BotAIController {
     let wantsJump = false;
 
     // Laser jump timing by difficulty:
-    // Easy: delayed jump reactions (checks smaller dist, can hesitate/delay)
-    // Medium: normal jump reactions (dist < 170)
-    // Hard: instant laser jump reaction (dist < 210, 0ms lag, clean leap)
-    const jumpDetectionDist = difficulty === 'hard' ? 210 : difficulty === 'easy' ? 120 : 170;
+    // Easy: slower reaction times (0.2-0.35s lag), 20% jump chance on hazard detection
+    // Medium: balanced reactions (0.08-0.12s lag)
+    // Hard: instant laser jump reaction (dist < 210, 0.01-0.03s razor-sharp reaction, clean leap)
+    const jumpDetectionDist = difficulty === 'hard' ? 210 : difficulty === 'easy' ? 140 : 170;
 
     for (const laser of track.lasers) {
       if (!laser.isActive && !laser.isWarning) continue;
@@ -156,14 +163,20 @@ export class BotAIController {
 
       if (dist < jumpDetectionDist && (bot.jumpCooldown || 0) <= 0 && (bot.jumpZ || 0) <= 2) {
         if (difficulty === 'easy') {
-          // Delayed jump reaction: 40% hesitation or delayed tick
+          // Slower reaction times (0.2-0.35s delay) with 20% jump execution chance
           state.reactionDelayTimer = (state.reactionDelayTimer || 0) + dt;
-          if (state.reactionDelayTimer > 0.18 || dist < 90) {
+          if (state.reactionDelayTimer > 0.25 || (dist < 85 && Math.random() < 0.20)) {
+            wantsJump = true;
+            state.reactionDelayTimer = 0;
+          }
+        } else if (difficulty === 'medium') {
+          state.reactionDelayTimer = (state.reactionDelayTimer || 0) + dt;
+          if (state.reactionDelayTimer > 0.09 || dist < 140) {
             wantsJump = true;
             state.reactionDelayTimer = 0;
           }
         } else {
-          // Medium / Hard: Instant reaction
+          // Hard: Instant razor-sharp reaction
           wantsJump = true;
         }
       }
@@ -187,8 +200,8 @@ export class BotAIController {
     while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
     while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
 
-    // Steering smoothing factor
-    const smoothFactor = difficulty === 'hard' ? 0.5 : difficulty === 'easy' ? 0.85 : 0.7;
+    // Steering smoothing factor (reaction speed)
+    const smoothFactor = difficulty === 'hard' ? 0.45 : difficulty === 'easy' ? 0.85 : 0.7;
     state.steerSmooth = state.steerSmooth * smoothFactor + angleDelta * (1 - smoothFactor);
     const steerMag = Math.min(1.0, Math.abs(state.steerSmooth) * (difficulty === 'hard' ? 2.5 : 2.0));
 
@@ -222,10 +235,10 @@ export class BotAIController {
           (isFinalLap && bot.nitroEnergy > 15) ||
           (closestRacerAheadDist < 180 && Math.abs(angleDelta) < 0.3);
       } else if (difficulty === 'easy') {
-        // Easy: Nitro used sparingly / cautiously
-        action2 = isStraightway && bot.nitroEnergy > 65 && Math.random() < 0.4;
+        // Easy: 20% boost chance on straightways
+        action2 = isStraightway && bot.nitroEnergy > 60 && Math.random() < 0.20;
       } else {
-        // Medium
+        // Medium: Balanced tactical nitro
         if (state.archetype === 'aggressive') {
           action2 = (isStraightway && bot.nitroEnergy > 30) || isDrafting || (isFinalLap && bot.nitroEnergy > 15);
         } else if (state.archetype === 'nitro-junkie') {
@@ -241,7 +254,7 @@ export class BotAIController {
         }
       }
 
-      state.nitroCheckCooldown = difficulty === 'hard' ? 0.2 + Math.random() * 0.2 : 0.4 + Math.random() * 0.4;
+      state.nitroCheckCooldown = difficulty === 'hard' ? 0.02 + Math.random() * 0.02 : difficulty === 'easy' ? 0.25 + Math.random() * 0.1 : 0.10 + Math.random() * 0.05;
     }
 
     return {

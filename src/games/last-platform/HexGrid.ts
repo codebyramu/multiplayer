@@ -254,7 +254,7 @@ export class HexGrid {
   }
 
   /**
-   * Called when a player steps on a tile. Can trigger destabilization.
+   * Called when a player or bot steps/stands on a tile. Triggers destabilization and decay.
    */
   public stepOnTile(tileId: number): void {
     const tile = this.tiles.get(tileId);
@@ -262,23 +262,21 @@ export class HexGrid {
 
     tile.isSteppedOn = true;
 
-    // Center hex tile (ring 0) is permanently stable and immune to stepping destabilization
-    if (tile.ring === 0) return;
-
     // Any platform tile stepped on by a player or bot enters the decay sequence
     if (tile.state === 'stable') {
       tile.state = 'warning';
       tile.stateTimer = 0;
-      // Faster break times: 1.5s warning → 1.0s crumbling (was 3.2s / 2.2s)
-      tile.warningDuration = this.suddenDeath ? 0.5 : 1.5;
-      tile.crumblingDuration = this.suddenDeath ? 0.4 : 1.0;
-      tile.shakeIntensity = 2.5;
+      tile.warningDuration = this.suddenDeath ? 0.6 : 1.4;
+      tile.crumblingDuration = this.suddenDeath ? 0.4 : 0.9;
+      tile.shakeIntensity = 3.0;
     } else if (tile.state === 'warning') {
-      // Significantly expedite crumble if continuously stood on — speed up by 0.15s per frame
-      tile.stateTimer += 0.15;
+      // Significantly expedite crumble if continuously stood on
+      tile.stateTimer += 0.05;
+      tile.shakeIntensity = Math.min(6.0, tile.shakeIntensity + 0.1);
     } else if (tile.state === 'crumbling') {
       // Expedite collapse if continuously stood on
-      tile.stateTimer += 0.12;
+      tile.stateTimer += 0.06;
+      tile.shakeIntensity = Math.min(8.0, tile.shakeIntensity + 0.15);
     }
   }
 

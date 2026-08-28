@@ -53,15 +53,15 @@ export class SerpentAIBrain {
       rawDiff === 'easy' ? 'easy' : rawDiff === 'hard' ? 'hard' : 'medium';
 
     // Difficulty Decision Interval:
-    // Easy: slower reaction interval (~0.20s lag)
-    // Medium: normal reaction interval (~0.06s)
-    // Hard: instant raycast and decision update every single frame (0s)
-    const decisionInterval = difficulty === 'easy' ? 0.20 : difficulty === 'medium' ? 0.06 : 0;
+    // Easy: slower reaction times (0.2-0.35s lag)
+    // Medium: balanced reactions (0.08-0.12s)
+    // Hard: razor-sharp reactions (0.01-0.03s)
+    const decisionInterval = difficulty === 'easy' ? 0.25 : difficulty === 'medium' ? 0.10 : 0.02;
 
     let desiredAngle = state.cachedDesiredAngle;
     let wantsBoost = state.cachedWantsBoost;
 
-    if (decisionInterval === 0 || state.stateTimer - state.lastDecisionTime >= decisionInterval) {
+    if (state.stateTimer - state.lastDecisionTime >= decisionInterval) {
       state.lastDecisionTime = state.stateTimer;
 
       const personality = bot.botPersonality || 'collector';
@@ -89,10 +89,12 @@ export class SerpentAIBrain {
           break;
       }
 
-      // Boost adjustments by difficulty
+      // Easy wandering & boost adjustments
       if (difficulty === 'easy') {
-        // Easy: 15% boost chance
-        wantsBoost = wantsBoost && Math.random() < 0.15;
+        // Easy: wanders with wandering noise
+        desiredAngle += Math.sin(state.chaoticPhase * 0.7) * 0.25;
+        // Easy: 20% boost chance
+        wantsBoost = wantsBoost && Math.random() < 0.20;
       }
 
       state.cachedDesiredAngle = desiredAngle;
@@ -100,14 +102,14 @@ export class SerpentAIBrain {
     }
 
     // 2. WHISKER-BASED COLLISION AVOIDANCE & WALL RAYCASTING
-    // Easy: wider collision margin, slower turn
-    // Medium: normal collision margin
-    // Hard: instant razor-sharp raycasts with surgical clearance
+    // Easy: wider collision margin (35px), relaxed turn
+    // Medium: balanced collision margin (12px)
+    // Hard: instant razor-sharp raycasts with surgical clearance (4px)
     const avoidance = this.computeCollisionAvoidance(bot, allSerpents, arenaRadius, difficulty);
     if (avoidance.needsAvoidance) {
       desiredAngle = avoidance.safeAngle;
       if (avoidance.urgency > 0.8 && bot.length > 20) {
-        if (difficulty !== 'easy' || Math.random() < 0.25) {
+        if (difficulty !== 'easy' || Math.random() < 0.20) {
           wantsBoost = true;
         }
       }
@@ -116,7 +118,7 @@ export class SerpentAIBrain {
     // Wrap desired angle to [0, 2*PI]
     const normalizedAngle = (desiredAngle % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
 
-    const isNearOverheat = (bot.continuousBoostDuration || 0) >= (difficulty === 'hard' ? 3.3 : 2.8);
+    const isNearOverheat = (bot.continuousBoostDuration || 0) >= (difficulty === 'hard' ? 2.9 : 2.8);
     const minLengthForBoost = difficulty === 'hard' ? 12 : 14;
     const allowBoost = wantsBoost && bot.length > minLengthForBoost && (!isNearOverheat || avoidance.urgency > 0.85);
 
@@ -180,8 +182,8 @@ export class SerpentAIBrain {
         }
 
         const angleDiff = Math.abs(this.angleDifference(bot.angle, desiredAngle));
-        // Hard: aggressively boost to cut them off
-        const wantsBoost = minDist < 320 && angleDiff < 0.85;
+        // Hard: aggressively boost to cut them off or close in the coil
+        const wantsBoost = minDist < 360 && angleDiff < 1.15;
         return { desiredAngle, wantsBoost };
       }
 
@@ -440,14 +442,14 @@ export class SerpentAIBrain {
     // Lookahead distance & safety margin by difficulty
     const lookaheadDist =
       difficulty === 'easy'
-        ? Math.max(160, bot.speed * 0.8)
+        ? Math.max(180, bot.speed * 0.85)
         : difficulty === 'hard'
         ? Math.max(110, bot.speed * 0.55)
         : Math.max(130, bot.speed * 0.65);
 
     // Collision buffer
     const collisionMargin =
-      difficulty === 'easy' ? 30 : difficulty === 'hard' ? 4 : 10;
+      difficulty === 'easy' ? 35 : difficulty === 'hard' ? 4 : 12;
 
     const scores = new Array(whiskerAngles.length).fill(0);
     let maxThreatUrgency = 0;

@@ -74,6 +74,11 @@ export const HostLobbyView: React.FC<HostLobbyViewProps> = ({
     const next: 'easy' | 'medium' | 'hard' = current === 'easy' ? 'medium' : current === 'medium' ? 'hard' : 'easy';
     if (room.players[botId]) {
       room.players[botId].difficulty = next;
+      // Trigger update event if available
+      if (onUpdateBots) {
+        const botCount = Object.values(room.players).filter((p) => p.isBot).length;
+        onUpdateBots(botCount);
+      }
     }
     const pitchMap = { easy: 800, medium: 950, hard: 1150 };
     soundManager.playClick(pitchMap[next]);

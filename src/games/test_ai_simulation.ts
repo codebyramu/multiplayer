@@ -210,6 +210,90 @@ for (const diff of difficulties) {
   assert(isTurningAwayFromWall, `Bot steers away from perimeter wall when facing boundary under ${diff}`);
 }
 
+// D. Comparative Difficulty Stress Test: Boost & Trapping Differences
+console.log('\n  [Serpent Arena - Comparative Behavioral Difference Test]');
+SerpentAIBrain.reset();
+const testPrey = {
+  id: 'prey_target',
+  name: 'Prey',
+  color: '#FFFFFF',
+  skin: 'synth' as any,
+  isBot: false,
+  botPersonality: 'collector' as const,
+  x: 200,
+  y: 0,
+  prevX: 190,
+  prevY: 0,
+  vx: 195,
+  vy: 0,
+  angle: 0,
+  targetAngle: 0,
+  angularVelocity: 0,
+  speed: 195,
+  baseSpeed: 195,
+  boostSpeed: 351,
+  turnSpeed: 4.2,
+  headRadius: 18,
+  score: 0,
+  mass: 20,
+  length: 20,
+  targetLength: 20,
+  energy: 100,
+  maxEnergy: 100,
+  isBoosting: false,
+  boostDistanceAccumulator: 0,
+  continuousBoostDuration: 0,
+  isOverheating: false,
+  body: [{ x: 200, y: 0, angle: 0, radius: 18 }],
+  history: [{ x: 200, y: 0, angle: 0, distance: 0 }],
+  totalDistanceTraveled: 0,
+  isDead: false,
+  kills: 0,
+  deaths: 0,
+  invulnerableTimer: 0,
+  eyeBlinkTimer: 2,
+  eyeBlinkState: 0,
+  lookAtOffsetAngle: 0,
+  pulseTime: 0,
+  skinSeed: 0,
+  hyperBoostTimer: 0,
+  ghostHuntTimer: 0,
+};
+
+const createHunterBot = (diff: 'easy' | 'medium' | 'hard') => ({
+  ...testPrey,
+  id: `hunter_${diff}`,
+  name: `Hunter_${diff}`,
+  botPersonality: 'aggressive' as const,
+  x: 0,
+  y: 0,
+  vx: 195,
+  vy: 0,
+  angle: 0,
+  mass: 50,
+  length: 50,
+  difficulty: diff,
+});
+
+let easyBoostCount = 0;
+let hardBoostCount = 0;
+const testSamples = 100;
+
+for (let i = 0; i < testSamples; i++) {
+  SerpentAIBrain.reset();
+  const easyBot = createHunterBot('easy');
+  const hardBot = createHunterBot('hard');
+
+  const easyInput = SerpentAIBrain.computeBotInput(easyBot, { [easyBot.id]: easyBot, [testPrey.id]: testPrey }, [], null, 1350, 0.3, null, 'easy');
+  if (easyInput.action1) easyBoostCount++;
+
+  const hardInput = SerpentAIBrain.computeBotInput(hardBot, { [hardBot.id]: hardBot, [testPrey.id]: testPrey }, [], null, 1350, 0.02, null, 'hard');
+  if (hardInput.action1) hardBoostCount++;
+}
+
+assert(hardBoostCount > easyBoostCount, `Hard bots boost more aggressively than Easy bots (${hardBoostCount}% vs ${easyBoostCount}%)`);
+assert(easyBoostCount <= 35, `Easy bots adhere to ~20% boost chance ceiling (${easyBoostCount}%)`);
+
 // -----------------------------------------------------------------------------
 // 2. NEON RELAY AUDIT
 // -----------------------------------------------------------------------------
@@ -278,6 +362,43 @@ for (const diff of difficulties) {
   }
   assert(!isNaN(racer.progressDistance), `Racer progress distance is valid number under ${diff}`);
 }
+
+// Comparative Laser Jump Reaction Test for Neon Relay
+console.log('\n  [Neon Relay - Comparative Laser Reaction Test]');
+const relayEngineTest = new NeonRelayEngine({ difficulty: 'hard' });
+relayEngineTest.init({
+  bot_test: {
+    id: 'bot_test',
+    socketId: 'sock_t',
+    name: 'TestRacer',
+    avatar: 'ship',
+    color: '#FF3366',
+    isHost: true,
+    isBot: true,
+    isReady: true,
+    score: 0,
+    ping: 0,
+    connected: true,
+    lastActive: Date.now(),
+  },
+});
+const testRacer = relayEngineTest.racers[0];
+const testLaser = relayEngineTest.track.lasers[0];
+testLaser.isActive = true;
+testRacer.x = testLaser.currentP1.x + 130;
+testRacer.y = testLaser.currentP1.y;
+testRacer.jumpCooldown = 0;
+testRacer.jumpZ = 0;
+
+// Hard bot instant reaction
+testRacer.botState = undefined;
+const hardJumpInput = BotAIController.computeInput(testRacer, relayEngineTest.racers, relayEngineTest.track, 0.016, 'hard');
+assert(hardJumpInput.action1 === true, 'Hard bot jumps laser barrier instantly (0ms delay)');
+
+// Easy bot delayed reaction on first tick
+testRacer.botState = undefined;
+const easyJumpInputFirstTick = BotAIController.computeInput(testRacer, relayEngineTest.racers, relayEngineTest.track, 0.016, 'easy');
+assert(easyJumpInputFirstTick.action1 === false, 'Easy bot hesitates on laser jump on initial tick (0.2-0.35s delay window)');
 
 // -----------------------------------------------------------------------------
 // 3. VOID TAG AUDIT
@@ -366,6 +487,38 @@ for (const diff of difficulties) {
   VoidTagBotAI.reset();
   assert(true, `VoidTagBotAI.reset() executes cleanly`);
 }
+
+// Comparative Ability Trigger Rates in Void Tag
+console.log('\n  [Void Tag - Comparative Ability Activation Test]');
+const tagEngineCompare = new VoidTagEngine({
+  p_h: { id: 'p_h', socketId: 's1', name: 'H', avatar: 'skull', color: '#F00', isHost: true, isBot: true, isReady: true, score: 0, ping: 0, connected: true, lastActive: Date.now() },
+  p_s: { id: 'p_s', socketId: 's2', name: 'S', avatar: 'ship', color: '#0F0', isHost: false, isBot: true, isReady: true, score: 0, ping: 0, connected: true, lastActive: Date.now() },
+}, undefined, { difficulty: 'easy', initialGracePeriod: 0 });
+
+const hunterC = tagEngineCompare.players['p_h'];
+const survivorC = tagEngineCompare.players['p_s'];
+hunterC.isHunter = true;
+survivorC.isHunter = false;
+hunterC.x = 200; hunterC.y = 200; hunterC.angle = 0; hunterC.dashCooldown = 0;
+survivorC.x = 350; survivorC.y = 200; survivorC.dashCooldown = 0; survivorC.empCooldown = 0;
+
+let easyHunterDashCount = 0;
+let hardHunterDashCount = 0;
+
+for (let i = 0; i < 100; i++) {
+  VoidTagBotAI.reset();
+  tagEngineCompare.config.difficulty = 'easy';
+  const easyIn = VoidTagBotAI.computeBotInput(hunterC, tagEngineCompare.players, [], [], [], tagEngineCompare.config, 0.3);
+  if (easyIn.action1) easyHunterDashCount++;
+
+  VoidTagBotAI.reset();
+  tagEngineCompare.config.difficulty = 'hard';
+  const hardIn = VoidTagBotAI.computeBotInput(hunterC, tagEngineCompare.players, [], [], [], tagEngineCompare.config, 0.02);
+  if (hardIn.action1) hardHunterDashCount++;
+}
+
+assert(hardHunterDashCount > easyHunterDashCount, `Hard hunters dash on line-of-sight more reliably than Easy (${hardHunterDashCount}% vs ${easyHunterDashCount}%)`);
+assert(easyHunterDashCount <= 35, `Easy hunters adhere to ~20% dash probability (${easyHunterDashCount}%)`);
 
 // -----------------------------------------------------------------------------
 // 4. RELIC RUSH AUDIT
@@ -497,10 +650,19 @@ for (const diff of difficulties) {
   botState2.isFrozen = false;
 
   const botAI = engine.bots.get('bot_lp1')!;
-  const input = botAI.update(0.016, botState1, engine.players, engine.hexGrid);
-  checkNoNaN(input, `Last Platform BotAI input under ${diff}`);
+  let freezeShotFired = false;
+  for (let sample = 0; sample < 30; sample++) {
+    (botAI as any).prevAction2 = false;
+    (botAI as any).shotPulseCooldown = 0;
+    const input = botAI.update(0.016, botState1, engine.players, engine.hexGrid);
+    checkNoNaN(input, `Last Platform BotAI input under ${diff}`);
+    if (input.action2) {
+      freezeShotFired = true;
+      break;
+    }
+  }
 
-  assert(input.action2 === true, `Bot fires Electric Freeze Shot at rival within range (100px) under ${diff}`);
+  assert(freezeShotFired, `Bot fires Electric Freeze Shot at rival within range (100px) under ${diff}`);
 
   // Test leaping over gap
   // Set current tile to crumbling
@@ -508,7 +670,11 @@ for (const diff of difficulties) {
   if (centerTile) {
     centerTile.state = 'crumbling';
   }
-  const leapInput = botAI.update(0.016, botState1, engine.players, engine.hexGrid);
+  (botAI as any).prevAction1 = false;
+  (botAI as any).jumpPulseCooldown = 0;
+  botState1.isGrounded = true;
+  botState1.canJump = true;
+  const leapInput = botAI.update(0.35, botState1, engine.players, engine.hexGrid);
   assert(leapInput.action1 === true, `Bot initiates jump when tile is crumbling under ${diff}`);
 
   // Run 100 ticks of full game simulation

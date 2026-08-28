@@ -6,6 +6,7 @@ export class BotAI {
   private botId: string;
   private config: LastPlatformConfig;
   private archetype: 'aggressive' | 'defensive' | 'collector' | 'ambusher' | 'chaotic';
+  public readonly difficulty: 'easy' | 'medium' | 'hard';
   
   // Tactical reaction timers
   private decisionTimer: number = 0;
@@ -13,7 +14,15 @@ export class BotAI {
   private targetY: number = 0;
   private targetTileId: number | null = null;
   private reactionDelay: number = 0.08;
-  private lastJumpAttempt: number = 0;
+  
+  // Easy difficulty delayed perception of crumbling tiles
+  private crumblePerceptionTimer: number = 0;
+
+  // Pulse edge triggers for jump/dash (action1) and freeze shot (action2)
+  private prevAction1: boolean = false;
+  private prevAction2: boolean = false;
+  private jumpPulseCooldown: number = 0;
+  private shotPulseCooldown: number = 0;
 
   constructor(
     botId: string,
@@ -24,7 +33,7 @@ export class BotAI {
     this.archetype = archetype;
     this.config = config;
 
-    const diff =
+    this.difficulty =
       config.difficulty === 'easy'
         ? 'easy'
         : config.difficulty === 'hard' || config.difficulty === 'extreme'
@@ -32,11 +41,11 @@ export class BotAI {
         : 'medium';
 
     this.reactionDelay =
-      diff === 'easy'
-        ? 0.22 + Math.random() * 0.08
-        : diff === 'hard'
+      this.difficulty === 'easy'
+        ? 0.30
+        : this.difficulty === 'hard'
         ? 0.01
-        : 0.05 + Math.random() * 0.05;
+        : 0.08;
   }
 
   /**
@@ -53,26 +62,44 @@ export class BotAI {
     }
 
     this.decisionTimer += dt;
-    const now = Date.now();
+    if (this.jumpPulseCooldown > 0) this.jumpPulseCooldown -= dt;
+    if (this.shotPulseCooldown > 0) this.shotPulseCooldown -= dt;
 
     // 1. Spatial Perception & Safety Evaluation
     const currentTile = hexGrid.getTileAt(botState.x, botState.y);
     const distFromCenter = Math.hypot(botState.x, botState.y);
     const isOutsideStorm = distFromCenter > hexGrid.currentDangerRadius && !currentTile?.isMoving;
-    const isCurrentTileDangerous = !!(
-      isOutsideStorm ||
-      !currentTile ||
-      (currentTile && (
+
+    let isCurrentTileDangerous = false;
+    if (isOutsideStorm || !currentTile) {
+      isCurrentTileDangerous = true;
+    } else {
+      const tileIsDecaying =
         currentTile.state === 'crumbling' ||
         currentTile.state === 'respawning' ||
         (currentTile.state === 'warning' && currentTile.stateTimer / currentTile.warningDuration > 0.35) ||
-        (hexGrid.suddenDeath && currentTile.ring >= 2)
-      ))
-    );
+        (hexGrid.suddenDeath && currentTile.ring >= 2);
+
+      if (tileIsDecaying) {
+        if (this.difficulty === 'easy') {
+          // Easy: 0.3s delayed reaction to crumbling tiles
+          this.crumblePerceptionTimer += dt;
+          if (this.crumblePerceptionTimer >= 0.30) {
+            isCurrentTileDangerous = true;
+          }
+        } else {
+          // Medium & Hard: Immediate evaluation of tile decay states
+          isCurrentTileDangerous = true;
+        }
+      } else {
+        this.crumblePerceptionTimer = 0;
+      }
+    }
+
     const isOverVoid = !currentTile || isOutsideStorm;
 
-    // Make tactical decision periodically or immediately upon high hazard
-    if (this.decisionTimer >= this.reactionDelay || isOverVoid || isCurrentTileDangerous) {
+    // Tactical decision timing
+    if (this.decisionTimer >= this.reactionDelay || isOverVoid || (isCurrentTileDangerous && this.difficulty !== 'easy')) {
       this.decisionTimer = 0;
       this.evaluateTargetPosition(botState, allPlayers, hexGrid, currentTile, isCurrentTileDangerous, isOverVoid);
     }
@@ -94,44 +121,115 @@ export class BotAI {
       magnitude = Math.min(1.0, distToTarget / 40);
     }
 
-    // 3. Jump & Air Hop Timing (Leaping gaps and escaping crumbling tiles)
-    let action1 = false; // Jump / Air-hop / Dash
+    // 3. Jump, Air Hop, and Offensive Dash Shoves (action1)
+    let wantAction1 = false;
 
-    // Check if intermediate point in movement direction is over a void pit / gap
+    // Check intermediate point in movement direction
     const midStepX = botState.x + moveX * 35;
     const midStepY = botState.y + moveY * 35;
     const midTile = hexGrid.getTileAt(midStepX, midStepY);
     const isMidGapVoid = !midTile || midTile.state === 'collapsed' || midTile.state === 'respawning';
 
-    // Condition A: Stepping on a crumbling tile, over void, or facing a gap ahead
+    // A. Ground Jump & Air-Hop across gaps and collapsing tiles
     if (isOverVoid || isCurrentTileDangerous || isMidGapVoid) {
       if (botState.isGrounded && botState.canJump) {
-        action1 = true;
-        this.lastJumpAttempt = now;
-      } else if (botState.isAirborne && botState.jumpsRemaining > 0 && (botState.z < 16 || botState.vz < 0)) {
-        // Airborne recovery air hop
-        action1 = true;
-      }
-    }
-
-    // Condition B: Leaping over a long distance gap between tiles
-    if (distToTarget > 50 && botState.isGrounded && Math.random() < 0.35) {
-      action1 = true;
-    }
-
-    // 4. Tactical 7-Second Electric Freeze Shot (action2)
-    let action2 = false;
-    if (botState.freezeShotCooldown <= 0 && !botState.isFrozen) {
-      const nearestRival = this.findNearestRival(botState, allPlayers);
-      if (nearestRival && !nearestRival.isFrozen) {
-        const rivalDist = Math.hypot(nearestRival.x - botState.x, nearestRival.y - botState.y);
-        if (rivalDist < 420 && Math.abs(nearestRival.z - botState.z) < 30) {
-          // Aim directly at opponent and fire freeze bolt
-          moveAngle = Math.atan2(nearestRival.y - botState.y, nearestRival.x - botState.x);
-          action2 = true;
+        wantAction1 = true;
+      } else if (this.difficulty !== 'easy') {
+        // Medium & Hard: Air-Hop / Air-Dash across collapsing voids
+        if (botState.isAirborne && botState.jumpsRemaining > 0) {
+          if (this.difficulty === 'hard') {
+            // Hard: Frame-perfect air hop at optimal trajectory (peak or descending)
+            if (botState.z < 20 || botState.vz <= 0) {
+              wantAction1 = true;
+            }
+          } else {
+            // Medium: Air hop when falling
+            if (botState.z < 15 || botState.vz < -50) {
+              wantAction1 = true;
+            }
+          }
         }
       }
     }
+
+    // B. Long distance gap jumping
+    if (distToTarget > 50 && botState.isGrounded && Math.random() < (this.difficulty === 'hard' ? 0.6 : 0.3)) {
+      wantAction1 = true;
+    }
+
+    // C. Hard Difficulty: Offensive Dash Shoves against rivals near edges
+    if (this.difficulty === 'hard' && botState.dashCooldown <= 0) {
+      const nearestRival = this.findNearestRival(botState, allPlayers);
+      if (nearestRival && !nearestRival.isFallingIntoVoid) {
+        const rivalDist = Math.hypot(nearestRival.x - botState.x, nearestRival.y - botState.y);
+        const rivalDistFromCenter = Math.hypot(nearestRival.x, nearestRival.y);
+
+        // If rival is within dash-shove strike distance (40-130px) and near perimeter or on weak tile
+        if (rivalDist > 30 && rivalDist < 130 && Math.abs(nearestRival.z - botState.z) < 25) {
+          const rivalTile = hexGrid.getTileAt(nearestRival.x, nearestRival.y);
+          const isRivalVulnerable = rivalDistFromCenter > hexGrid.currentDangerRadius * 0.45 || (rivalTile && rivalTile.state !== 'stable');
+
+          if (isRivalVulnerable) {
+            // Align dash vector directly into rival
+            moveX = (nearestRival.x - botState.x) / rivalDist;
+            moveY = (nearestRival.y - botState.y) / rivalDist;
+            moveAngle = Math.atan2(moveY, moveX);
+            magnitude = 1.0;
+            wantAction1 = true; // Trigger Air-Dash Shove!
+          }
+        }
+      }
+    }
+
+    // Edge pulse action1
+    let action1 = false;
+    if (wantAction1 && this.jumpPulseCooldown <= 0 && !this.prevAction1) {
+      action1 = true;
+      this.jumpPulseCooldown = 0.12;
+    }
+    this.prevAction1 = action1;
+
+    // 4. Tactical 7-Second Electric Freeze Shot (action2)
+    let wantAction2 = false;
+    if (botState.freezeShotCooldown <= 0 && !botState.isFrozen) {
+      const nearestRival = this.findNearestRival(botState, allPlayers);
+      if (nearestRival && !nearestRival.isFrozen && !nearestRival.isFallingIntoVoid) {
+        const rivalDist = Math.hypot(nearestRival.x - botState.x, nearestRival.y - botState.y);
+
+        if (rivalDist < 440 && Math.abs(nearestRival.z - botState.z) < 32) {
+          if (this.difficulty === 'hard') {
+            // Hard: Predicts rival movement with freeze projectile (speed = 780)
+            const projectileSpeed = 780;
+            const timeToHit = rivalDist / projectileSpeed;
+            const predX = nearestRival.x + (nearestRival.vx || 0) * timeToHit;
+            const predY = nearestRival.y + (nearestRival.vy || 0) * timeToHit;
+
+            moveAngle = Math.atan2(predY - botState.y, predX - botState.x);
+            wantAction2 = true;
+          } else if (this.difficulty === 'medium') {
+            // Medium: Fires freeze shot directly at close rivals
+            if (rivalDist < 380) {
+              moveAngle = Math.atan2(nearestRival.y - botState.y, nearestRival.x - botState.x);
+              wantAction2 = true;
+            }
+          } else {
+            // Easy: Low frequency and close range only
+            if (rivalDist < 200 && Math.random() < 0.25) {
+              moveAngle = Math.atan2(nearestRival.y - botState.y, nearestRival.x - botState.x);
+              wantAction2 = true;
+            }
+          }
+        }
+      }
+    }
+
+    // Edge pulse action2
+    let action2 = false;
+    if (wantAction2 && this.shotPulseCooldown <= 0 && !this.prevAction2) {
+      action2 = true;
+      this.shotPulseCooldown = 0.2;
+    }
+    this.prevAction2 = action2;
 
     return {
       x: moveX,
@@ -140,7 +238,7 @@ export class BotAI {
       magnitude,
       action1,
       action2,
-      timestamp: now,
+      timestamp: Date.now(),
     };
   }
 
@@ -172,16 +270,11 @@ export class BotAI {
         // Hunt the nearest alive rival to shove them off
         const nearestRival = this.findNearestRival(botState, allPlayers);
         if (nearestRival) {
-          // Position slightly behind the rival relative to arena center to push them outwards
-          const rivalDistFromCenter = Math.hypot(nearestRival.x, nearestRival.y);
           const angleToRival = Math.atan2(nearestRival.y, nearestRival.x);
-          
-          // Stand on safe side of rival
-          const offsetDist = 45;
+          const offsetDist = this.difficulty === 'hard' ? 35 : 50;
           const approachX = nearestRival.x - Math.cos(angleToRival) * offsetDist;
           const approachY = nearestRival.y - Math.sin(angleToRival) * offsetDist;
 
-          // Verify approach position is on safe tile
           const approachTile = hexGrid.getTileAt(approachX, approachY);
           if (approachTile && approachTile.state !== 'collapsed') {
             this.targetX = approachX;
@@ -193,18 +286,28 @@ export class BotAI {
       }
 
       case 'defensive': {
-        // Camp at ring 0 or 1 (center of the arena), away from edges and rivals
-        const safeTile = hexGrid.getClosestSafeTile(0, 0);
+        // Patrol across stable tiles in rings 1 and 2, actively moving rather than camping
+        const candidateTiles = hexGrid.tilesList.filter(
+          t => (t.state === 'stable' || t.state === 'warning') && t.ring >= 1 && t.ring <= 3
+        );
+        if (candidateTiles.length > 0) {
+          const randTile = candidateTiles[Math.floor(Math.random() * candidateTiles.length)];
+          this.targetX = randTile.worldX;
+          this.targetY = randTile.worldY;
+          this.targetTileId = randTile.id;
+          return;
+        }
+        const safeTile = hexGrid.getClosestSafeTile(botState.x, botState.y);
         if (safeTile) {
-          this.targetX = safeTile.worldX + (Math.random() - 0.5) * 20;
-          this.targetY = safeTile.worldY + (Math.random() - 0.5) * 20;
+          this.targetX = safeTile.worldX;
+          this.targetY = safeTile.worldY;
+          this.targetTileId = safeTile.id;
           return;
         }
         break;
       }
 
       case 'ambusher': {
-        // Wait near outer safe perimeter, then charge when rival approaches
         const nearestRival = this.findNearestRival(botState, allPlayers);
         if (nearestRival && Math.hypot(nearestRival.x - botState.x, nearestRival.y - botState.y) < 160) {
           this.targetX = nearestRival.x;
@@ -215,7 +318,6 @@ export class BotAI {
       }
 
       case 'chaotic': {
-        // Rapidly leap between random stable tiles
         if (Math.random() < 0.3 || !this.targetTileId) {
           const candidateTiles = hexGrid.tilesList.filter(t => t.state === 'stable' && t.ring <= 3);
           if (candidateTiles.length > 0) {
@@ -231,7 +333,6 @@ export class BotAI {
 
       case 'collector':
       default: {
-        // Hold the highest stability tile cluster
         const centerSafe = hexGrid.getClosestSafeTile(0, 0);
         if (centerSafe) {
           this.targetX = centerSafe.worldX;
@@ -244,63 +345,6 @@ export class BotAI {
     // Default fallback: Move toward center of the arena
     this.targetX = 0;
     this.targetY = 0;
-  }
-
-  /**
-   * Evaluates whether to activate Gravity Shockwave Push (action2) to blast rivals off edges.
-   */
-  private evaluateShockwaveAttack(
-    botState: PlayerPhysicsState,
-    allPlayers: Record<string, PlayerPhysicsState>,
-    hexGrid: HexGrid
-  ): boolean {
-    const shockwaveRange = this.config.shockwaveRadius * 0.9;
-
-    for (const pid in allPlayers) {
-      if (pid === botState.id) continue;
-      const rival = allPlayers[pid];
-      if (rival.isEliminated || rival.isFallingIntoVoid) continue;
-
-      const dx = rival.x - botState.x;
-      const dy = rival.y - botState.y;
-      const dist = Math.hypot(dx, dy);
-
-      if (dist <= shockwaveRange) {
-        // 1. Is rival close to arena perimeter?
-        const rivalDistFromCenter = Math.hypot(rival.x, rival.y);
-        const botDistFromCenter = Math.hypot(botState.x, botState.y);
-
-        // Vector from bot to rival
-        const blastAngle = Math.atan2(dy, dx);
-        // Vector from center to rival
-        const outAngle = Math.atan2(rival.y, rival.x);
-
-        // Dot product / angle alignment: is blast pushing rival outward?
-        const angleDiff = Math.abs(blastAngle - outAngle);
-        const isPushingOutward = angleDiff < Math.PI * 0.45;
-
-        // 2. Is rival standing on a crumbling / warning tile?
-        const rivalTile = hexGrid.getTileAt(rival.x, rival.y);
-        const isRivalTileWeak = rivalTile && (rivalTile.state === 'crumbling' || rivalTile.state === 'warning');
-
-        // Aggressive condition: Rival is pushed outward or rival is on weak ground
-        if (isPushingOutward && (rivalDistFromCenter > hexGrid.currentDangerRadius * 0.45 || isRivalTileWeak)) {
-          return true;
-        }
-
-        // Defensive panic condition: If rival is too close to me and I am near edge
-        if (dist < 60 && botDistFromCenter > hexGrid.currentDangerRadius * 0.7) {
-          return true;
-        }
-
-        // Archetype aggression
-        if (this.archetype === 'aggressive' && dist < shockwaveRange * 0.8) {
-          return Math.random() < 0.6;
-        }
-      }
-    }
-
-    return false;
   }
 
   /**
@@ -340,3 +384,4 @@ export class BotAI {
     };
   }
 }
+

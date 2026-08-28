@@ -288,7 +288,7 @@ export class ShadowOutrunEngine {
   // ---------------------------------------------------------------------------
   public handleInput(playerId: string, input: ControllerInput): void {
     const player = this.players.get(playerId);
-    if (!player || player.isArrested) return;
+    if (!player || player.isArrested || player.isBot) return;
 
     if (input.magnitude > 0.05) {
       player.targetAngle = input.angle;
@@ -401,8 +401,17 @@ export class ShadowOutrunEngine {
   // ---------------------------------------------------------------------------
   // MAIN TICK LOOP (60FPS Physics & Gameplay)
   // ---------------------------------------------------------------------------
-  public tick(dt: number): void {
+  public tick(dt: number, inputs?: Record<string, ControllerInput>): void {
     if (this.isGameOver || this.state === 'finished') return;
+
+    // Apply human controller inputs
+    if (inputs) {
+      for (const [pid, input] of Object.entries(inputs)) {
+        if (input) {
+          this.handleInput(pid, input);
+        }
+      }
+    }
 
     // Clamp dt
     const safeDt = Math.min(dt, 0.05);
@@ -512,7 +521,14 @@ export class ShadowOutrunEngine {
       (p) => p.role === 'thief' && !p.isArrested
     );
 
-    this.players.forEach((bot) => {
+    const diff =
+      this.config.difficulty === 'easy'
+        ? 'easy'
+        : this.config.difficulty === 'hard' || this.config.difficulty === 'extreme'
+        ? 'hard'
+        : 'medium';
+
+    this.players.forEach((bot, botIdx) => {
       if (!bot.isBot || bot.isArrested) return;
 
       bot.aiDecisionTimer = (bot.aiDecisionTimer || 0) - dt;
@@ -521,38 +537,92 @@ export class ShadowOutrunEngine {
       // ----------------- CATCHER / DEPUTY BOT AI -----------------
       if (bot.role === 'catcher' || bot.role === 'deputy') {
         if (needsDecision) {
-          bot.aiDecisionTimer = 0.2 + Math.random() * 0.15;
+          bot.aiDecisionTimer =
+            diff === 'easy'
+              ? 0.30 + Math.random() * 0.1
+              : diff === 'hard'
+              ? 0.02
+              : 0.14 + Math.random() * 0.08;
 
-          // 1. Look for nearest visible thief
+          // Target Selection & Deputy Coordination
           let bestTarget: ShadowOutrunPlayer | null = null;
           let minTargetDist = Infinity;
 
-          for (const thief of thieves) {
-            const dx = thief.x - bot.x;
-            const dy = thief.y - bot.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+          // Rank thieves by distance & score
+          const rankedThieves = thieves
+            .map((t) => ({
+              thief: t,
+              dist: Math.hypot(t.x - bot.x, t.y - bot.y),
+              hasLOS: this.checkLineOfSight(bot.x, bot.y, t.x, t.y, true),
+            }))
+            .filter((t) => (t.hasLOS && t.dist < 750) || t.dist < 220)
+            .sort((a, b) => a.dist - b.dist);
 
-            // Direct line of sight or within proximity radar
-            const hasLOS = this.checkLineOfSight(bot.x, bot.y, thief.x, thief.y, true);
-            if ((hasLOS && dist < 650) || dist < 180) {
-              if (dist < minTargetDist) {
-                minTargetDist = dist;
-                bestTarget = thief;
-              }
+          if (rankedThieves.length > 0) {
+            if (diff === 'hard' && bot.role === 'deputy' && rankedThieves.length > 1) {
+              // Hard Deputy Coordination: Deputy flanks secondary thief or covers alternate route
+              bestTarget = rankedThieves[1].thief;
+            } else {
+              bestTarget = rankedThieves[0].thief;
             }
           }
 
           if (bestTarget) {
             bot.aiState = 'hunt';
             bot.aiTargetPlayerId = bestTarget.id;
-            // Lead target slightly
-            bot.aiTargetX = bestTarget.x + bestTarget.vx * 0.3;
-            bot.aiTargetY = bestTarget.y + bestTarget.vy * 0.3;
+
+            if (diff === 'hard') {
+              // Hard: Raycast-predict thief escape corridors
+              const leadTime = 0.65;
+              const predX = bestTarget.x + bestTarget.vx * leadTime;
+              const predY = bestTarget.y + bestTarget.vy * leadTime;
+
+              const hasDirectPath = this.checkLineOfSight(bot.x, bot.y, predX, predY, false);
+              if (hasDirectPath) {
+                bot.aiTargetX = predX;
+                bot.aiTargetY = predY;
+              } else {
+                // Find corner or doorway to intercept corridor
+                let bestCornerX = predX;
+                let bestCornerY = predY;
+                let minCornerDist = Infinity;
+
+                for (const wall of this.map.walls) {
+                  if (wall.isGlass) continue;
+                  const corners = [
+                    { x: wall.x - 30, y: wall.y - 30 },
+                    { x: wall.x + wall.width + 30, y: wall.y - 30 },
+                    { x: wall.x - 30, y: wall.y + wall.height + 30 },
+                    { x: wall.x + wall.width + 30, y: wall.y + wall.height + 30 },
+                  ];
+
+                  for (const c of corners) {
+                    const dToPred = Math.hypot(c.x - predX, c.y - predY);
+                    const dToBot = Math.hypot(c.x - bot.x, c.y - bot.y);
+                    if (dToPred < 180 && dToBot < minCornerDist) {
+                      minCornerDist = dToBot;
+                      bestCornerX = c.x;
+                      bestCornerY = c.y;
+                    }
+                  }
+                }
+                bot.aiTargetX = bestCornerX;
+                bot.aiTargetY = bestCornerY;
+              }
+            } else if (diff === 'medium') {
+              // Medium: Direct chase with slight lead
+              bot.aiTargetX = bestTarget.x + bestTarget.vx * 0.3;
+              bot.aiTargetY = bestTarget.y + bestTarget.vy * 0.3;
+            } else {
+              // Easy: Direct chase, no lead
+              bot.aiTargetX = bestTarget.x;
+              bot.aiTargetY = bestTarget.y;
+            }
           } else {
             bot.aiState = 'patrol';
             bot.aiTargetPlayerId = undefined;
-            // Patrol towards random coin spawn location or center
-            if (!bot.aiTargetX || Math.hypot(bot.aiTargetX - bot.x, bot.aiTargetY! - bot.y) < 60) {
+            // Patrol towards random coin spawn location
+            if (!bot.aiTargetX || Math.hypot(bot.aiTargetX - bot.x, bot.aiTargetY! - bot.y) < 70) {
               const randPoint = this.map.coinSpawnPoints[
                 Math.floor(Math.random() * this.map.coinSpawnPoints.length)
               ];
@@ -562,24 +632,44 @@ export class ShadowOutrunEngine {
           }
         }
 
-        // Steer & aim flashlight torch directly at target/waypoint
+        // Steer & aim flashlight torch
         if (bot.aiTargetX !== undefined && bot.aiTargetY !== undefined) {
           const dx = bot.aiTargetX - bot.x;
           const dy = bot.aiTargetY - bot.y;
           const targetHeading = Math.atan2(dy, dx);
 
-          bot.beamAngle = targetHeading;
-          bot.angle = targetHeading;
-          bot.vx = Math.cos(targetHeading) * bot.currentSpeed;
-          bot.vy = Math.sin(targetHeading) * bot.currentSpeed;
+          if (diff === 'easy') {
+            // Easy: Casually sweeps torch with oscillating sine wave sweep
+            const charCode = bot.id.charCodeAt(0) || 0;
+            const sweepOffset = Math.sin(this.globalTime * 1.8 + charCode) * 0.6;
+            const desiredAngle = bot.aiState === 'hunt' ? targetHeading : targetHeading + sweepOffset;
+            let angleDiff = desiredAngle - bot.beamAngle;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            bot.beamAngle += angleDiff * Math.min(1.0, 3.5 * dt);
+            bot.angle = bot.beamAngle;
+          } else {
+            bot.beamAngle = targetHeading;
+            bot.angle = targetHeading;
+          }
 
-          // Catcher dash when close to target (< 160px)
-          if (
-            bot.aiState === 'hunt' &&
-            Math.hypot(dx, dy) < 160 &&
-            bot.dashCooldown <= 0 &&
-            !bot.isDashing
-          ) {
+          bot.vx = Math.cos(bot.angle) * bot.currentSpeed;
+          bot.vy = Math.sin(bot.angle) * bot.currentSpeed;
+
+          // Catcher dash triggers
+          const distToTarget = Math.hypot(dx, dy);
+          let shouldDash = false;
+          if (bot.aiState === 'hunt' && bot.dashCooldown <= 0 && !bot.isDashing) {
+            if (diff === 'hard' && distToTarget < 220) {
+              shouldDash = true;
+            } else if (diff === 'medium' && distToTarget < 160) {
+              shouldDash = true;
+            } else if (diff === 'easy' && distToTarget < 100 && Math.random() < 0.10) {
+              shouldDash = true;
+            }
+          }
+
+          if (shouldDash) {
             bot.isDashing = true;
             bot.dashTimer = 0.5;
             bot.dashCooldown = bot.maxDashCooldown;
@@ -592,7 +682,12 @@ export class ShadowOutrunEngine {
       // ----------------- THIEF BOT AI -----------------
       else if (bot.role === 'thief') {
         if (needsDecision) {
-          bot.aiDecisionTimer = 0.15 + Math.random() * 0.15;
+          bot.aiDecisionTimer =
+            diff === 'easy'
+              ? 0.30 + Math.random() * 0.1
+              : diff === 'hard'
+              ? 0.03
+              : 0.12 + Math.random() * 0.06;
 
           // 1. Check danger from nearest catcher
           let nearestCatcher: ShadowOutrunPlayer | null = null;
@@ -606,30 +701,124 @@ export class ShadowOutrunEngine {
             }
           }
 
-          // In danger if catcher is close (< 380px) or bot is currently slowed by flashlight
-          if (nearestCatcher && (minCatcherDist < 380 || bot.isSlowed)) {
+          const dangerDist = diff === 'easy' ? 260 : diff === 'hard' ? 440 : 360;
+          const isInDanger = nearestCatcher && (minCatcherDist < dangerDist || bot.isSlowed);
+
+          if (isInDanger && nearestCatcher) {
             bot.aiState = 'flee';
             bot.alertState = 'danger';
             bot.alertTimer = 1.0;
 
-            // Flee vector away from catcher
-            const fleeAngle = Math.atan2(bot.y - nearestCatcher.y, bot.x - nearestCatcher.x);
+            if (diff === 'hard') {
+              // Hard: 8-Directional escape raycast scoring & pillar evasion
+              let bestAngle = Math.atan2(bot.y - nearestCatcher.y, bot.x - nearestCatcher.x);
+              let bestScore = -Infinity;
 
-            // Add side-step jitter to maneuver around walls
-            const jitter = (Math.random() - 0.5) * 0.8;
-            bot.aiTargetX = bot.x + Math.cos(fleeAngle + jitter) * 350;
-            bot.aiTargetY = bot.y + Math.sin(fleeAngle + jitter) * 350;
+              const numRays = 8;
+              for (let i = 0; i < numRays; i++) {
+                const rayAngle = (i * Math.PI * 2) / numRays;
+                const probeDist = 200;
+                const probeX = Math.max(60, Math.min(this.width - 60, bot.x + Math.cos(rayAngle) * probeDist));
+                const probeY = Math.max(60, Math.min(this.height - 60, bot.y + Math.sin(rayAngle) * probeDist));
 
-            // Thief panic dash if in flashlight cone
-            if (bot.isSlowed && bot.dashCooldown <= 0 && !bot.isDashing) {
-              bot.isDashing = true;
-              bot.dashTimer = 0.6;
-              bot.dashCooldown = bot.maxDashCooldown;
-              this.addShockwave(bot.x, bot.y, 40, '#00E5FF');
-              if (this.onSound) this.onSound('boost', 1000);
+                const clearToProbe = this.checkLineOfSight(bot.x, bot.y, probeX, probeY, false);
+                if (!clearToProbe) continue;
+
+                // Evaluate score: distance from catcher + wall occlusion bonus
+                const dCatcher = Math.hypot(probeX - nearestCatcher.x, probeY - nearestCatcher.y);
+                const hasLOSFromCatcher = this.checkLineOfSight(nearestCatcher.x, nearestCatcher.y, probeX, probeY, false);
+                const occlusionBonus = !hasLOSFromCatcher ? 400 : 0;
+
+                const score = dCatcher + occlusionBonus;
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestAngle = rayAngle;
+                }
+              }
+
+              // Dynamic zigzag lateral oscillation around pillars
+              const zigzagOffset = Math.sin(this.globalTime * 9 + bot.id.charCodeAt(0)) * 0.55;
+              bot.aiTargetX = bot.x + Math.cos(bestAngle + zigzagOffset) * 320;
+              bot.aiTargetY = bot.y + Math.sin(bestAngle + zigzagOffset) * 320;
+
+              // Hard Evasive panic dash
+              if ((bot.isSlowed || minCatcherDist < 200) && bot.dashCooldown <= 0 && !bot.isDashing) {
+                bot.isDashing = true;
+                bot.dashTimer = 0.6;
+                bot.dashCooldown = bot.maxDashCooldown;
+                this.addShockwave(bot.x, bot.y, 40, '#00E5FF');
+                if (this.onSound) this.onSound('boost', 1000);
+              }
+            } else if (diff === 'medium') {
+              // Medium: Break line of sight behind solid walls
+              let foundHidingSpot = false;
+              let bestHideX = bot.x;
+              let bestHideY = bot.y;
+              let minHideDist = Infinity;
+
+              for (const wall of this.map.walls) {
+                if (wall.isGlass) continue;
+                const dWall = Math.hypot(wall.x + wall.width / 2 - bot.x, wall.y + wall.height / 2 - bot.y);
+                if (dWall > 350) continue;
+
+                // Potential shadow spot behind wall relative to catcher
+                const wallCenterX = wall.x + wall.width / 2;
+                const wallCenterY = wall.y + wall.height / 2;
+                const awayDirX = wallCenterX - nearestCatcher.x;
+                const awayDirY = wallCenterY - nearestCatcher.y;
+                const len = Math.hypot(awayDirX, awayDirY) || 1;
+
+                const spotX = wallCenterX + (awayDirX / len) * (wall.width / 2 + 35);
+                const spotY = wallCenterY + (awayDirY / len) * (wall.height / 2 + 35);
+
+                const isOccluded = !this.checkLineOfSight(nearestCatcher.x, nearestCatcher.y, spotX, spotY, false);
+                const isPathClear = this.checkLineOfSight(bot.x, bot.y, spotX, spotY, false);
+
+                if (isOccluded && isPathClear) {
+                  const dToSpot = Math.hypot(spotX - bot.x, spotY - bot.y);
+                  if (dToSpot < minHideDist) {
+                    minHideDist = dToSpot;
+                    bestHideX = spotX;
+                    bestHideY = spotY;
+                    foundHidingSpot = true;
+                  }
+                }
+              }
+
+              if (foundHidingSpot) {
+                bot.aiTargetX = bestHideX;
+                bot.aiTargetY = bestHideY;
+              } else {
+                const fleeAngle = Math.atan2(bot.y - nearestCatcher.y, bot.x - nearestCatcher.x);
+                bot.aiTargetX = bot.x + Math.cos(fleeAngle) * 320;
+                bot.aiTargetY = bot.y + Math.sin(fleeAngle) * 320;
+              }
+
+              // Medium panic dash if slowed
+              if (bot.isSlowed && bot.dashCooldown <= 0 && !bot.isDashing) {
+                bot.isDashing = true;
+                bot.dashTimer = 0.6;
+                bot.dashCooldown = bot.maxDashCooldown;
+                this.addShockwave(bot.x, bot.y, 40, '#00E5FF');
+                if (this.onSound) this.onSound('boost', 1000);
+              }
+            } else {
+              // Easy: Occasional mistakes and getting cornered
+              const fleeAngle = Math.atan2(bot.y - nearestCatcher.y, bot.x - nearestCatcher.x);
+              const mistakeJitter = (Math.random() - 0.5) * 2.0; // Significant jitter causes bot to get stuck/cornered
+              bot.aiTargetX = bot.x + Math.cos(fleeAngle + mistakeJitter) * 280;
+              bot.aiTargetY = bot.y + Math.sin(fleeAngle + mistakeJitter) * 280;
+
+              if (bot.isSlowed && Math.random() < 0.15 && bot.dashCooldown <= 0 && !bot.isDashing) {
+                bot.isDashing = true;
+                bot.dashTimer = 0.6;
+                bot.dashCooldown = bot.maxDashCooldown;
+                this.addShockwave(bot.x, bot.y, 40, '#00E5FF');
+                if (this.onSound) this.onSound('boost', 1000);
+              }
             }
           } else {
-            // Safe: scavenge for nearest uncollected coin
+            // Safe: Scavenge coins
             bot.aiState = 'scavenge';
             let nearestCoin: CoinEntity | null = null;
             let minCoinDist = Infinity;
@@ -648,7 +837,6 @@ export class ShadowOutrunEngine {
               bot.aiTargetX = nearestCoin.x;
               bot.aiTargetY = nearestCoin.y;
             } else {
-              // Roam around map
               bot.aiTargetX = 200 + Math.random() * (this.width - 400);
               bot.aiTargetY = 200 + Math.random() * (this.height - 400);
             }
