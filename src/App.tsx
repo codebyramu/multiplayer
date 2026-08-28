@@ -206,24 +206,37 @@ export const App: React.FC = () => {
 
   // --- ACTIONS --- //
 
-  // 1. HOST: Create Room
+  // 1. HOST: Create Room (Browser-Authoritative Serverless P2P + Socket fallback)
   const handleHostCreateParty = async (selectedGame?: string) => {
     soundManager.playClick(900);
     const validGame = (selectedGame as GameId) || 'serpent-arena';
-    // Create room on socket server
-    const res = await socketClient.createRoom(validGame);
-    if (res.success && res.room) {
-      const roomWithBots = {
-        ...res.room,
-        localIp: res.localIp,
-        selectedGame: validGame,
-        players: LocalRoomEngine.generateBots(res.room.botCount || 3, res.room.players),
-      };
-      setRoom(roomWithBots);
+    const code = `HYP${Math.floor(10 + Math.random() * 89)}`;
+
+    // Try Socket server first, or seamlessly launch browser-as-server P2PHostServer
+    try {
+      const res = await socketClient.createRoom(validGame);
+      if (res.success && res.room) {
+        const roomWithBots = {
+          ...res.room,
+          localIp: res.localIp,
+          selectedGame: validGame,
+          players: LocalRoomEngine.generateBots(res.room.botCount || 3, res.room.players),
+        };
+        setRoom(roomWithBots);
+        setMatchState('lobby');
+        setCurrentTab('host');
+        return;
+      }
+    } catch {}
+
+    // 100% Serverless Host (TV/Laptop browser runs the room server via WebRTC P2P)
+    try {
+      const { p2pHostServer } = await import('./multiplayer/P2PHostServer');
+      const p2pRoom = await p2pHostServer.startHost(code, validGame, 3);
+      setRoom(p2pRoom);
       setMatchState('lobby');
       setCurrentTab('host');
-    } else {
-      // Offline fallback: Use Local Room Engine
+    } catch {
       const localRoom = LocalRoomEngine.createLocalRoom(validGame, 3);
       const roomWithBots = {
         ...localRoom,
@@ -386,7 +399,7 @@ export const App: React.FC = () => {
     setCurrentTab('hub');
   };
 
-  // 15. PLAYER CONTROLLER: Join Room via Phone
+  // 15. PLAYER CONTROLLER: Join Room via Phone (WebRTC P2P to TV + Socket fallback)
   const handleJoinParty = async (data: {
     code: string;
     name: string;
@@ -394,30 +407,63 @@ export const App: React.FC = () => {
     color: string;
     skin: string;
   }): Promise<{ success: boolean; error?: string }> => {
-    const res = await socketClient.joinRoom(data);
-    if (res.success && res.room) {
-      setRoom(res.room);
-      setPlayerId(res.playerId || `p_${Date.now()}`);
-      soundManager.playVictoryFanfare();
+    // 1. Try Socket Server first
+    try {
+      const res = await socketClient.joinRoom(data);
+      if (res.success && res.room) {
+        setRoom(res.room);
+        setPlayerId(res.playerId || `p_${Date.now()}`);
+        soundManager.playVictoryFanfare();
+        return { success: true };
+      }
+    } catch {}
 
-      // Establish direct peer-to-peer WebRTC DataChannel
-      try {
-        const clientRTC = new WebRTCManager(false);
-        clientWebRTCRef.current = clientRTC;
-        clientRTC.connectAsClient();
-      } catch {}
+    // 2. Connect directly to TV/Host Browser via Serverless WebRTC P2P
+    try {
+      const { p2pClient } = await import('./multiplayer/P2PClient');
+      const p2pRes = await p2pClient.connectToHost(data.code, data);
+      if (p2pRes.success && p2pRes.room) {
+        setRoom(p2pRes.room);
+        setPlayerId(p2pRes.playerId || `p_${Date.now()}`);
+        soundManager.playVictoryFanfare();
 
-      return { success: true };
+        // Listen for host P2P broadcasts
+        p2pClient.on('game-selected', ({ gameId, room }) => setRoom(room));
+        p2pClient.on('countdown-started', () => setMatchState('countdown'));
+        p2pClient.on('game-started', ({ room }) => {
+          setRoom(room);
+          setMatchState('playing');
+        });
+        p2pClient.on('game-ended', ({ results }) => {
+          setMatchResults(results);
+          setMatchState('results');
+        });
+        p2pClient.on('returned-to-lobby', ({ room }) => {
+          setRoom(room);
+          setMatchResults(null);
+          setMatchState('lobby');
+        });
+
+        return { success: true };
+      }
+      return { success: false, error: p2pRes.error || 'Party code not found on host screen.' };
+    } catch (e: any) {
+      return { success: false, error: 'Could not connect to Host TV. Verify party code.' };
     }
-    return { success: false, error: res.error || 'Unable to connect to room. Verify code and network.' };
   };
 
-  // 16. PLAYER CONTROLLER: Send Input (WebRTC DataChannel with WebSocket fallback)
+  // 16. PLAYER CONTROLLER: Send Input (P2P Direct WebRTC with Socket fallback)
   const handleSendInput = (input: ControllerInput) => {
-    const sentViaRTC = clientWebRTCRef.current?.sendInputDirect(input);
-    if (!sentViaRTC) {
+    // Direct P2P send to TV host
+    import('./multiplayer/P2PClient').then(({ p2pClient }) => {
+      if (p2pClient.isConnected) {
+        p2pClient.sendInput(input);
+        return;
+      }
       socketClient.sendInput(input);
-    }
+    }).catch(() => {
+      socketClient.sendInput(input);
+    });
   };
 
   return (
