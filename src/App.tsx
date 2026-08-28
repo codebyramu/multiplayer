@@ -142,6 +142,39 @@ export const App: React.FC = () => {
       remoteInputsRef.current[data.playerId] = data.input;
     });
 
+    const unbindP2PPlayerJoined = p2pHostServer.on('player-joined', (data: { player: Player; room: RoomState }) => {
+      setRoom((prev) => {
+        if (!prev) return data.room;
+        const nextPlayers = { ...prev.players, [data.player.id]: data.player };
+        return { ...prev, players: nextPlayers };
+      });
+      soundManager.playPickup(750);
+    });
+
+    const unbindP2PPlayerLeft = p2pHostServer.on('player-left', (data: { playerId: string; room: RoomState }) => {
+      setRoom((prev) => {
+        if (!prev) return data.room;
+        const nextPlayers = { ...prev.players };
+        delete nextPlayers[data.playerId];
+        return { ...prev, players: nextPlayers };
+      });
+    });
+
+    const unbindP2PPlayerReady = p2pHostServer.on('player-ready-updated', (data: { playerId: string; isReady: boolean; room: RoomState }) => {
+      setRoom((prev) => {
+        if (!prev) return data.room;
+        const player = prev.players[data.playerId];
+        if (!player) return prev;
+        return {
+          ...prev,
+          players: {
+            ...prev.players,
+            [data.playerId]: { ...player, isReady: data.isReady },
+          },
+        };
+      });
+    });
+
     const unbindSyncGameState = socketClient.on('sync-game-state', (data: any) => {
       // Sync lightweight HUD data for controller (own HUD or all HUDs for spectator mode)
       if (data?.hud) {
