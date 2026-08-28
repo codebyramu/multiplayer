@@ -212,45 +212,34 @@ export const App: React.FC = () => {
 
   // --- ACTIONS --- //
 
-  // 1. HOST: Create Room (Browser-Authoritative Serverless P2P + Socket fallback)
-  const handleHostCreateParty = async (selectedGame?: string) => {
+  // 1. HOST: Create Room (Instant 0ms Local Authoritative + Background P2PHostServer)
+  const handleHostCreateParty = (selectedGame?: string) => {
     soundManager.playClick(900);
     const validGame = (selectedGame as GameId) || 'serpent-arena';
     const code = `HYP${Math.floor(10 + Math.random() * 89)}`;
 
-    // Try Socket server first, or seamlessly launch browser-as-server P2PHostServer
-    try {
-      const res = await socketClient.createRoom(validGame);
-      if (res.success && res.room) {
-        const roomWithBots = {
-          ...res.room,
-          localIp: res.localIp,
-          selectedGame: validGame,
-          players: LocalRoomEngine.generateBots(res.room.botCount || 3, res.room.players),
-        };
-        setRoom(roomWithBots);
-        setMatchState('lobby');
-        setCurrentTab('host');
-        return;
-      }
-    } catch {}
+    // 1. Instant 0ms transition into Host Lobby
+    const localRoom = LocalRoomEngine.createLocalRoom(validGame, 3);
+    const roomWithBots: RoomState = {
+      ...localRoom,
+      code,
+      selectedGame: validGame,
+      players: LocalRoomEngine.generateBots(3, localRoom.players),
+    };
+    setRoom(roomWithBots);
+    setMatchState('lobby');
+    setCurrentTab('host');
 
-    // 100% Serverless Host (TV/Laptop browser runs the room server via WebRTC P2P)
-    try {
-      const p2pRoom = await p2pHostServer.startHost(code, validGame, 3);
-      setRoom(p2pRoom);
-      setMatchState('lobby');
-      setCurrentTab('host');
-    } catch {
-      const localRoom = LocalRoomEngine.createLocalRoom(validGame, 3);
-      const roomWithBots = {
-        ...localRoom,
-        players: LocalRoomEngine.generateBots(3, localRoom.players),
-      };
-      setRoom(roomWithBots);
-      setMatchState('lobby');
-      setCurrentTab('host');
-    }
+    // 2. Asynchronously spin up WebRTC Host Server & Socket relay in background (non-blocking)
+    p2pHostServer.startHost(code, validGame, 3).then((p2pRoom) => {
+      setRoom((prev) => (prev ? { ...prev, ...p2pRoom, code } : p2pRoom));
+    }).catch(() => {});
+
+    socketClient.createRoom(validGame).then((res) => {
+      if (res.success && res.room) {
+        setRoom((prev) => (prev ? { ...prev, localIp: res.localIp } : prev));
+      }
+    }).catch(() => {});
   };
 
   // 2. QUICK PLAY (Direct Launch into Game with Bots)

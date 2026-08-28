@@ -65,7 +65,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
         audioContextRef.current = ctx;
         const now = ctx.currentTime;
 
-        // Cinematic sub-bass boom at 50% volume
+        // Cinematic sub-bass impact boom at 50% volume
         const sub = ctx.createOscillator();
         const gain = ctx.createGain();
         sub.type = 'sine';
@@ -78,18 +78,16 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
         sub.start(now);
         sub.stop(now + 2.5);
       }
+    } catch {}
+  };
 
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance("Welcome to Hypercade. Play on TV, control with phone.");
-        utterance.rate = 1.05;
-        utterance.pitch = 1.05;
-        utterance.volume = 0.50; // 50% volume
-        const voices = window.speechSynthesis.getVoices();
-        const techVoice = voices.find(v => v.lang.includes('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel')));
-        if (techVoice) utterance.voice = techVoice;
-        window.speechSynthesis.speak(utterance);
-      }
+  // Play high quality human-like neural studio voiceover as the main page fades in
+  const playRealisticVoiceover = () => {
+    if (isMuted) return;
+    try {
+      const voiceAudio = new Audio('/audio/voiceover_welcome.mp3');
+      voiceAudio.volume = 0.85;
+      voiceAudio.play().catch(() => {});
     } catch {}
   };
 
@@ -127,6 +125,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
 
   const handleFinish = () => {
     setStage('fading_out');
+    playRealisticVoiceover(); // Triggers human neural studio voice as main page emerges
     setTimeout(() => {
       onEnter();
     }, 1200);
