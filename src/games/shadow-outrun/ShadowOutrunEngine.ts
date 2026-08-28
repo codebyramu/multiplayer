@@ -1461,8 +1461,6 @@ export class ShadowOutrunEngine {
       ctx.save();
       ctx.strokeStyle = laser.color;
       ctx.lineWidth = 4;
-      ctx.shadowColor = laser.color;
-      ctx.shadowBlur = 12;
 
       ctx.beginPath();
       ctx.moveTo(laser.x1, laser.y1);
@@ -1491,8 +1489,6 @@ export class ShadowOutrunEngine {
       if (coin.type === 'diamond') {
         // Cyan Diamond
         ctx.fillStyle = '#00FFFF';
-        ctx.shadowColor = '#00FFFF';
-        ctx.shadowBlur = 14;
         ctx.beginPath();
         ctx.moveTo(0, -coin.radius * 1.3);
         ctx.lineTo(coin.radius, 0);
@@ -1507,8 +1503,6 @@ export class ShadowOutrunEngine {
       } else if (coin.type === 'loot_bag') {
         // Green Loot Bag
         ctx.fillStyle = '#10B981';
-        ctx.shadowColor = '#10B981';
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.arc(0, 0, coin.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -1520,8 +1514,6 @@ export class ShadowOutrunEngine {
       } else {
         // Gold Coin
         ctx.fillStyle = '#FFD700';
-        ctx.shadowColor = '#FFB224';
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.arc(0, 0, coin.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -1717,8 +1709,6 @@ export class ShadowOutrunEngine {
       if (p.isSlowed) {
         ctx.strokeStyle = '#FFE600';
         ctx.lineWidth = 3;
-        ctx.shadowColor = '#FFE600';
-        ctx.shadowBlur = 15;
         ctx.beginPath();
         ctx.arc(0, 0, p.radius + 6, 0, Math.PI * 2);
         ctx.stroke();
@@ -1726,8 +1716,6 @@ export class ShadowOutrunEngine {
 
       // Base Body Circle
       ctx.fillStyle = p.isArrested ? '#4B5563' : p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = p.isArrested ? 0 : 12;
       ctx.beginPath();
       ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -1776,8 +1764,6 @@ export class ShadowOutrunEngine {
       // Name Label above head
       ctx.font = 'bold 12px sans-serif';
       ctx.fillStyle = '#FFFFFF';
-      ctx.shadowColor = '#000000';
-      ctx.shadowBlur = 4;
       ctx.fillText(p.name, 0, -p.radius - 8);
 
       // Alert Bubble
@@ -1806,8 +1792,6 @@ export class ShadowOutrunEngine {
       ctx.strokeStyle = sw.color;
       ctx.lineWidth = 3;
       ctx.globalAlpha = sw.alpha;
-      ctx.shadowColor = sw.color;
-      ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
       ctx.stroke();
@@ -1819,8 +1803,6 @@ export class ShadowOutrunEngine {
       ctx.save();
       ctx.fillStyle = p.color;
       ctx.globalAlpha = p.alpha;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
@@ -1831,11 +1813,15 @@ export class ShadowOutrunEngine {
     this.floatingTexts.forEach((txt) => {
       ctx.save();
       ctx.font = `bold ${txt.size}px monospace`;
-      ctx.fillStyle = txt.color;
       ctx.globalAlpha = txt.alpha;
       ctx.textAlign = 'center';
-      ctx.shadowColor = '#000000';
-      ctx.shadowBlur = 6;
+
+      // Outline
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.strokeText(txt.text, txt.x, txt.y);
+
+      ctx.fillStyle = txt.color;
       ctx.fillText(txt.text, txt.x, txt.y);
       ctx.restore();
     });

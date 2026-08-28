@@ -1800,10 +1800,7 @@ export class RelicRushEngine {
     // Glowing Arena Border
     ctx.strokeStyle = '#FFB224';
     ctx.lineWidth = 3;
-    ctx.shadowColor = '#FFB224';
-    ctx.shadowBlur = 15;
     ctx.strokeRect(30, 30, this.width - 60, this.height - 60);
-    ctx.shadowBlur = 0;
 
     // Corner hazard diagonal stripes
     this.renderHazardCorners(ctx);
@@ -1886,12 +1883,9 @@ export class RelicRushEngine {
 
       // Ground glow
       ctx.fillStyle = relic.glowColor;
-      ctx.shadowColor = relic.color;
-      ctx.shadowBlur = relic.tier === 'cosmic' ? 25 : 12;
       ctx.beginPath();
       ctx.arc(relic.x, renderY, relic.radius * 0.8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       ctx.translate(relic.x, renderY);
       ctx.rotate(relic.rotation);
@@ -1925,8 +1919,6 @@ export class RelicRushEngine {
       ctx.translate(-r * 0.35, -r * 0.35);
       ctx.rotate(this.globalTime * 2);
       ctx.fillStyle = '#FFFFFF';
-      ctx.shadowColor = '#FFFFFF';
-      ctx.shadowBlur = 6;
 
       // 4-pointed cross star sparkle
       ctx.beginPath();
@@ -1965,35 +1957,31 @@ export class RelicRushEngine {
   }
 
   private renderSilverGem(ctx: CanvasRenderingContext2D, r: number): void {
-    ctx.fillStyle = '#E0F7FA';
-    ctx.strokeStyle = '#00E5FF';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = '#94A3B8';
+    ctx.strokeStyle = '#E2E8F0';
+    ctx.lineWidth = 1.5;
 
     ctx.beginPath();
-    ctx.moveTo(0, -r);
-    ctx.lineTo(r, 0);
-    ctx.lineTo(0, r);
-    ctx.lineTo(-r, 0);
+    const sides = 6;
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
     ctx.closePath();
     ctx.fill();
-    ctx.stroke();
-
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.5, 0);
-    ctx.lineTo(r * 0.5, 0);
-    ctx.moveTo(0, -r * 0.5);
-    ctx.lineTo(0, r * 0.5);
     ctx.stroke();
   }
 
   private renderDiamondGem(ctx: CanvasRenderingContext2D, r: number): void {
-    ctx.fillStyle = '#00F5A0';
+    ctx.fillStyle = '#00E5FF';
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
 
     ctx.beginPath();
-    const sides = 6;
+    const sides = 8;
     for (let i = 0; i < sides; i++) {
       const a = (i / sides) * Math.PI * 2;
       const px = Math.cos(a) * r;
@@ -2020,9 +2008,6 @@ export class RelicRushEngine {
   }
 
   private renderCosmicCoreGem(ctx: CanvasRenderingContext2D, r: number): void {
-    ctx.shadowColor = '#FF007F';
-    ctx.shadowBlur = 20;
-
     // Outer rotating energy ring
     ctx.strokeStyle = '#FF007F';
     ctx.lineWidth = 3;
@@ -2050,7 +2035,6 @@ export class RelicRushEngine {
     ctx.beginPath();
     ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
   }
 
   private renderPowerupIcon(
@@ -2088,8 +2072,6 @@ export class RelicRushEngine {
       ctx.strokeStyle = sw.color;
       ctx.lineWidth = sw.lineWidth;
       ctx.globalAlpha = sw.alpha;
-      ctx.shadowColor = sw.color;
-      ctx.shadowBlur = 10;
 
       ctx.beginPath();
       ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
@@ -2171,8 +2153,6 @@ export class RelicRushEngine {
         ctx.save();
         ctx.strokeStyle = `rgba(255, 51, 102, ${flashAlpha * 0.9})`;
         ctx.lineWidth = 4;
-        ctx.shadowColor = '#FF0033';
-        ctx.shadowBlur = 24 * flashAlpha;
         ctx.beginPath();
         ctx.arc(0, 0, 32, 0, Math.PI * 2);
         ctx.stroke();
@@ -2195,8 +2175,6 @@ export class RelicRushEngine {
       ctx.fillStyle = player.damageFlashTimer > 0 ? '#551122' : '#1A1D26';
       ctx.strokeStyle = player.damageFlashTimer > 0 ? '#FF3366' : player.color;
       ctx.lineWidth = 3;
-      ctx.shadowColor = player.damageFlashTimer > 0 ? '#FF3366' : player.color;
-      ctx.shadowBlur = player.isTackling ? 20 : 10;
 
       // Triangular Arrowhead Cybercraft
       ctx.beginPath();
@@ -2207,7 +2185,6 @@ export class RelicRushEngine {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      ctx.shadowBlur = 0;
 
       // Cockpit Canopy Glow
       ctx.fillStyle = player.color;
@@ -2223,8 +2200,6 @@ export class RelicRushEngine {
 
         ctx.strokeStyle = '#9D4EDD';
         ctx.lineWidth = 3;
-        ctx.shadowColor = '#9D4EDD';
-        ctx.shadowBlur = 18;
 
         const pulseScale = 1.0 + Math.sin(this.globalTime * 12) * 0.08;
         ctx.beginPath();
@@ -2233,7 +2208,6 @@ export class RelicRushEngine {
 
         ctx.fillStyle = 'rgba(157, 78, 221, 0.2)';
         ctx.fill();
-        ctx.shadowBlur = 0;
       }
 
       // 7. Stunned Visual FX
@@ -2266,12 +2240,9 @@ export class RelicRushEngine {
     ctx.save();
     const cargoGlowRadius = 14 + hoardFactor * 18;
     ctx.fillStyle = `rgba(255, 178, 36, ${0.15 + hoardFactor * 0.25})`;
-    ctx.shadowColor = '#FFB224';
-    ctx.shadowBlur = 15 * hoardFactor;
     ctx.beginPath();
     ctx.arc(player.x - 12, player.y, cargoGlowRadius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
 
     // Layered Orbiting Gems
     for (let i = 0; i < gemCount; i++) {
@@ -2289,7 +2260,7 @@ export class RelicRushEngine {
       else if (player.hoardedValue >= 75 && i % 3 === 0) gemColor = '#00F5A0'; // Diamond
       else if (player.hoardedValue >= 40 && i % 2 === 0) gemColor = '#00E5FF'; // Silver
 
-      // Glowing tether filament
+      // Tether filament
       ctx.strokeStyle = `rgba(255, 178, 36, ${0.15 + hoardFactor * 0.15})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -2299,12 +2270,9 @@ export class RelicRushEngine {
 
       // Orbiting gemstone
       ctx.fillStyle = gemColor;
-      ctx.shadowColor = gemColor;
-      ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.arc(gx, gy, isOuter ? 3.5 : 4.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
@@ -2334,11 +2302,15 @@ export class RelicRushEngine {
     this.floatingTexts.forEach((txt) => {
       ctx.save();
       ctx.globalAlpha = txt.alpha;
-      ctx.fillStyle = txt.color;
-      ctx.shadowColor = txt.color;
-      ctx.shadowBlur = 8;
       ctx.font = `bold ${txt.fontSize}px 'Press Start 2P', monospace, sans-serif`;
       ctx.textAlign = 'center';
+
+      // Outline
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.strokeText(txt.text, txt.x, txt.y);
+
+      ctx.fillStyle = txt.color;
       ctx.fillText(txt.text, txt.x, txt.y);
       ctx.restore();
     });
@@ -2413,8 +2385,6 @@ export class RelicRushEngine {
       ctx.fillStyle = 'rgba(11, 13, 18, 0.9)';
       ctx.strokeStyle = this.bannerColor;
       ctx.lineWidth = 2;
-      ctx.shadowColor = this.bannerColor;
-      ctx.shadowBlur = 12;
 
       ctx.beginPath();
       ctx.roundRect(-300, -20, 600, 40, 8);
