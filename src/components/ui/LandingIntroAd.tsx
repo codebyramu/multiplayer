@@ -7,33 +7,41 @@ interface LandingIntroAdProps {
   onEnter: () => void;
 }
 
-// 4 High-definition cinematic slides synced with the 3 storyboard scenes
+// 4 Cinematic slides directly matching the storyboard narrative
 const CINEMATIC_SLIDES = [
-  '/cinematics/slide_1.jpg', // Scene 1: Neon Highway Cyber Intro
-  '/cinematics/slide_2.jpg', // Scene 2: Big Screen TV meets Phone Arena
-  '/cinematics/slide_3.jpg', // Scene 3: Shadow Vault & Backrooms Heist
-  '/cinematics/slide_4.jpg', // Scene 3b: Quantum Hex Matrix Launch
+  {
+    image: '/cinematics/slide_1.jpg',
+    tag: 'NEXT-GEN MULTIPLAYER',
+    title: 'PLAY ON TV',
+    subtitle: 'CONTROL WITH PHONE',
+    desc: 'Zero app downloads. 60 FPS authoritative sync. Scan to join instantly.',
+  },
+  {
+    image: '/cinematics/slide_2.jpg',
+    tag: 'PHONE CONTROLLER ARENA',
+    title: '6 DYNAMIC ARCADE GAMES',
+    subtitle: '1 TO 8 PLAYERS & BOTS',
+    desc: 'Battle friends in high-speed racing, snake battle royales, and stealth flashlight heists.',
+  },
+  {
+    image: '/cinematics/slide_3.jpg',
+    tag: 'READY FOR LAUNCH',
+    title: 'STEP INTO THE ARENA',
+    subtitle: 'HYPERCADE STUDIO',
+    desc: 'Entering arcade arena now...',
+  },
 ];
 
 export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
-  // Stage state: 'initial_enter_screen' -> 'playing_commercial' -> 'fading_out'
   const [stage, setStage] = useState<'enter_screen' | 'playing_commercial' | 'fading_out'>('enter_screen');
-  const [phase, setPhase] = useState<number>(1);
+  const [activeSlide, setActiveSlide] = useState<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Synchronized Slide Index strictly matching the current storyboard scene phase
-  const currentSlideImage =
-    phase === 1
-      ? CINEMATIC_SLIDES[0]
-      : phase === 2
-      ? CINEMATIC_SLIDES[1]
-      : CINEMATIC_SLIDES[2];
-
-  // Play Web Audio Chords & Natural AI Voice
+  // Synthesize atmosphere + AI Voice
   const startAudioAndVoice = () => {
     try {
       soundManager.init();
-      soundManager.playClick(900);
+      soundManager.playClick(950);
 
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtxClass) {
@@ -41,7 +49,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
         audioContextRef.current = ctx;
         const now = ctx.currentTime;
 
-        // Cinematic deep sub-bass boom
+        // Sub-bass impact
         const sub = ctx.createOscillator();
         const gain = ctx.createGain();
         sub.type = 'sine';
@@ -54,7 +62,7 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
         sub.start(now);
         sub.stop(now + 2.3);
 
-        // Cyber harmonic synth riser at 2.4s (Scene 2 transition)
+        // Cyber harmonic chords
         setTimeout(() => {
           if (!audioContextRef.current) return;
           const c = audioContextRef.current;
@@ -64,18 +72,17 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
             const g = c.createGain();
             osc.type = 'sawtooth';
             osc.frequency.setValueAtTime(freq, t);
-            osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + 1.6);
-            g.gain.setValueAtTime(0.15, t);
+            osc.frequency.exponentialRampToValueAtTime(freq * 1.4, t + 1.6);
+            g.gain.setValueAtTime(0.12, t);
             g.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
             osc.connect(g);
             g.connect(c.destination);
             osc.start(t);
             osc.stop(t + 1.9);
           });
-        }, 2400);
+        }, 2600);
       }
 
-      // Natural AI Voiceover
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance("Welcome to Hypercade. Play on TV, control with phone.");
@@ -96,30 +103,27 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
 
   const finishAndFadeOut = () => {
     setStage('fading_out');
-    // Slow cinematic 1.2-second fade out to reveal main page
     setTimeout(() => {
       onEnter();
     }, 1200);
   };
 
-  // Storyboard timing loop: Scene 1 (0.0s) -> Scene 2 (2.6s) -> Scene 3 (5.2s) -> Auto Fade-Out (7.8s)
+  // Synchronized Slide Progression: Slide 0 (0-2.6s) -> Slide 1 (2.6-5.2s) -> Slide 2 (5.2-7.8s) -> Auto Exit
   useEffect(() => {
     if (stage !== 'playing_commercial') return;
 
-    const p2Timer = setTimeout(() => setPhase(2), 2600);
-    const p3Timer = setTimeout(() => setPhase(3), 5200);
-
-    // Full 7.8s commercial finishes -> automatically triggers slow cinematic fade out
-    const autoFinishTimer = setTimeout(() => {
-      finishAndFadeOut();
-    }, 7800);
+    const s1Timer = setTimeout(() => setActiveSlide(1), 2600);
+    const s2Timer = setTimeout(() => setActiveSlide(2), 5200);
+    const autoFinishTimer = setTimeout(() => finishAndFadeOut(), 7800);
 
     return () => {
-      clearTimeout(p2Timer);
-      clearTimeout(p3Timer);
+      clearTimeout(s1Timer);
+      clearTimeout(s2Timer);
       clearTimeout(autoFinishTimer);
     };
   }, [stage]);
+
+  const currentSlide = CINEMATIC_SLIDES[activeSlide];
 
   return (
     <motion.div
@@ -128,66 +132,66 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
       transition={{ duration: 1.2, ease: 'easeInOut' }}
       className="fixed inset-0 z-[200] bg-[#040508] flex flex-col items-center justify-center select-none overflow-hidden touch-none font-display"
     >
-      {/* ─── 1. INITIAL CLICK-TO-ENTER STAGE ─── */}
+      {/* ─── 1. CLICK TO ENTER INITIAL CARD ─── */}
       {stage === 'enter_screen' && (
-        <div className="relative z-20 flex flex-col items-center justify-center text-center p-6 max-w-md mx-auto space-y-6">
+        <div className="relative z-20 flex flex-col items-center justify-center text-center p-4 sm:p-6 max-w-md mx-auto space-y-6 w-full">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,245,160,0.18)_0%,rgba(157,78,221,0.12)_45%,transparent_75%)] animate-pulse pointer-events-none" />
 
           <motion.div
-            initial={{ opacity: 0, scale: 0.85, y: 20 }}
+            initial={{ opacity: 0, scale: 0.88, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="p-8 rounded-3xl bg-black/60 border-2 border-white/15 backdrop-blur-2xl shadow-[0_0_80px_rgba(0,245,160,0.25)] space-y-6 relative overflow-hidden"
+            className="p-6 sm:p-8 rounded-3xl bg-black/70 border-2 border-white/15 backdrop-blur-2xl shadow-[0_0_80px_rgba(0,245,160,0.25)] space-y-6 relative overflow-hidden w-full"
           >
             <motion.div
               animate={{ rotate: [-3, 3, -3], scale: [1, 1.06, 1] }}
               transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-              className="text-6xl drop-shadow-[0_0_30px_rgba(255,178,36,0.9)]"
+              className="text-5xl sm:text-6xl drop-shadow-[0_0_30px_rgba(255,178,36,0.9)]"
             >
               👑
             </motion.div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <h1 className="font-arcade text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-arcade-amber via-white to-arcade-mint tracking-wider">
                 HYPERCADE
               </h1>
-              <p className="font-mono text-xs text-white/70 uppercase tracking-widest">
+              <p className="font-mono text-[11px] sm:text-xs text-white/70 uppercase tracking-widest">
                 LIVING ROOM MULTIPLAYER ARCADE
               </p>
             </div>
 
             <motion.button
-              whileHover={{ scale: 1.06, filter: 'brightness(1.15)' }}
-              whileTap={{ scale: 0.94 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={handleStartLandingPresentation}
-              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-arcade-amber via-yellow-400 to-arcade-mint text-black font-arcade text-sm font-black tracking-widest shadow-[0_0_35px_rgba(0,245,160,0.8)] flex items-center justify-center gap-3 active:scale-95 border border-white/40"
+              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-arcade-amber via-yellow-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_35px_rgba(0,245,160,0.8)] flex items-center justify-center gap-2 border border-white/40 active:scale-95"
             >
-              <Play className="w-5 h-5 fill-current" />
+              <Play className="w-4 h-4 fill-current" />
               <span>ENTER EXPERIENCE ▶</span>
             </motion.button>
 
-            <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-white/50">
+            <div className="flex items-center justify-center gap-2 text-[10px] sm:text-[11px] font-mono text-white/50">
               <Volume2 className="w-3.5 h-3.5 text-arcade-mint" />
-              <span>TURN UP VOLUME &bull; 7-SEC CINEMATIC INTRO</span>
+              <span>TURN UP VOLUME &bull; 7-SEC INTRO</span>
             </div>
           </motion.div>
         </div>
       )}
 
-      {/* ─── 2. PLAYING 7-SECOND VIDEO SLIDESHOW COMMERCIAL (SYNCED WITH ANIMATIONS) ─── */}
+      {/* ─── 2. PLAYING SYNCHRONIZED CINEMATIC STORYBOARD ─── */}
       {(stage === 'playing_commercial' || stage === 'fading_out') && (
-        <div className="relative w-full h-full flex flex-col justify-between p-6 sm:p-12">
-          {/* Background Image strictly synced with storyboard phase */}
+        <div className="relative w-full h-full flex flex-col justify-between p-4 sm:p-12">
+          {/* Background image animated & crossfaded strictly with current storyboard scene */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <AnimatePresence mode="sync">
               <motion.div
-                key={currentSlideImage}
-                initial={{ opacity: 0, scale: 1.15, filter: 'blur(10px)' }}
+                key={currentSlide.image}
+                initial={{ opacity: 0, scale: 1.15, filter: 'blur(12px)' }}
                 animate={{ opacity: 1, scale: 1.02, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: 1.6, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute inset-0 bg-cover bg-center bg-no-repeat filter brightness-[0.75] contrast-125"
-                style={{ backgroundImage: `url(${currentSlideImage})` }}
+                transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1] }}
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat filter brightness-[0.7] contrast-125"
+                style={{ backgroundImage: `url(${currentSlide.image})` }}
               />
             </AnimatePresence>
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/80" />
@@ -196,127 +200,94 @@ export const LandingIntroAd: React.FC<LandingIntroAdProps> = ({ onEnter }) => {
 
           {/* Top Bar with Skip Action */}
           <header className="relative z-10 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/20 backdrop-blur-xl flex items-center justify-center text-lg shadow-lg">
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white/10 border border-white/20 backdrop-blur-xl flex items-center justify-center text-base sm:text-lg shadow-lg">
                 ⚡
               </div>
               <div className="flex flex-col">
-                <span className="font-arcade text-base font-black tracking-widest text-white">
+                <span className="font-arcade text-sm sm:text-base font-black tracking-widest text-white">
                   HYPER<span className="text-arcade-amber">CADE</span>
                 </span>
-                <span className="font-mono text-[9px] text-white/50 tracking-widest uppercase">
-                  ATMOSPHERIC MULTIPLAYER ENGINE
+                <span className="font-mono text-[8px] sm:text-[9px] text-white/50 tracking-widest uppercase">
+                  ATMOSPHERIC MULTIPLAYER
                 </span>
               </div>
             </div>
 
             <button
               onClick={finishAndFadeOut}
-              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-mono text-white/80 hover:text-white backdrop-blur-xl transition-all flex items-center gap-2 hover:scale-105 active:scale-95"
+              className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] sm:text-xs font-mono text-white/80 hover:text-white backdrop-blur-xl transition-all flex items-center gap-1.5 active:scale-95"
             >
-              <span>SKIP INTRO</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <span>SKIP</span>
+              <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </button>
           </header>
 
-          {/* Center Storyboard Text synced with Background Imagery */}
-          <main className="relative z-10 max-w-4xl mx-auto text-center space-y-6 my-auto">
+          {/* Center Storyboard Text synced strictly with the Active Background */}
+          <main className="relative z-10 max-w-3xl mx-auto text-center space-y-4 sm:space-y-6 my-auto px-2">
             <AnimatePresence mode="wait">
-              {/* SCENE 1: Neon Highway Headline */}
-              {phase === 1 && (
-                <motion.div
-                  key="scene1"
-                  initial={{ opacity: 0, y: 25 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.6 }}
-                  className="space-y-4"
-                >
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-arcade-amber/15 border border-arcade-amber/30 text-arcade-amber font-mono text-xs font-semibold backdrop-blur-md">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>NEXT-GEN LIVING ROOM MULTIPLAYER</span>
-                  </div>
+              <motion.div
+                key={`scene-${activeSlide}`}
+                initial={{ opacity: 0, y: 25, scale: 0.94 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 1.05 }}
+                transition={{ duration: 0.6 }}
+                className="space-y-3 sm:space-y-4"
+              >
+                {/* Tag */}
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-arcade-amber/20 border border-arcade-amber/40 text-arcade-amber font-mono text-[10px] sm:text-xs font-bold backdrop-blur-md">
+                  <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span>{currentSlide.tag}</span>
+                </div>
 
-                  <h1 className="text-4xl sm:text-6xl md:text-7xl font-black text-white tracking-tight leading-tight">
-                    Play on <span className="text-transparent bg-clip-text bg-gradient-to-r from-arcade-amber to-orange-400">TV</span>.<br />
-                    Control with <span className="text-transparent bg-clip-text bg-gradient-to-r from-arcade-mint to-cyan-400">Phone</span>.
-                  </h1>
+                {/* Animated Headline */}
+                <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-white tracking-tight leading-tight drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]">
+                  {currentSlide.title}<br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-arcade-amber via-yellow-300 to-arcade-mint">
+                    {currentSlide.subtitle}
+                  </span>
+                </h1>
 
-                  <p className="text-sm sm:text-base text-white/70 max-w-lg mx-auto font-medium leading-relaxed">
-                    Zero app installs. Real-time 60 FPS authoritative sync. Scan room code to battle instantly.
-                  </p>
-                </motion.div>
-              )}
+                {/* Description */}
+                <p className="text-xs sm:text-sm md:text-base text-white/80 max-w-lg mx-auto font-medium leading-relaxed drop-shadow-md">
+                  {currentSlide.desc}
+                </p>
 
-              {/* SCENE 2: Big Screen TV + Phone Stadium */}
-              {phase === 2 && (
-                <motion.div
-                  key="scene2"
-                  initial={{ opacity: 0, scale: 0.92 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 1.05 }}
-                  transition={{ duration: 0.6 }}
-                  className="space-y-5"
-                >
-                  <div className="flex items-center justify-center gap-6">
-                    <div className="p-4 sm:p-5 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-2xl shadow-2xl flex items-center gap-3">
-                      <Tv className="w-8 h-8 text-arcade-amber" />
-                      <div className="text-left">
-                        <div className="font-arcade text-xs text-white">HOST SCREEN</div>
-                        <div className="font-mono text-[10px] text-white/50">60 FPS Authoritative Physics</div>
-                      </div>
+                {/* Dynamic device icons for slide 1 */}
+                {activeSlide === 1 && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center justify-center gap-4 sm:gap-6 pt-2"
+                  >
+                    <div className="p-3 sm:p-4 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-2xl flex items-center gap-2.5">
+                      <Tv className="w-5 h-5 sm:w-6 sm:h-6 text-arcade-amber" />
+                      <span className="font-arcade text-[10px] sm:text-xs text-white">TV HOST</span>
                     </div>
-
-                    <div className="text-white/40 text-xl font-bold">+</div>
-
-                    <div className="p-4 sm:p-5 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-2xl shadow-2xl flex items-center gap-3">
-                      <Smartphone className="w-8 h-8 text-arcade-mint" />
-                      <div className="text-left">
-                        <div className="font-arcade text-xs text-white">PHONE GAMEPAD</div>
-                        <div className="font-mono text-[10px] text-white/50">Tactile Low Latency Touch</div>
-                      </div>
+                    <span className="text-white/40 font-bold">+</span>
+                    <div className="p-3 sm:p-4 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-2xl flex items-center gap-2.5">
+                      <Smartphone className="w-5 h-5 sm:w-6 sm:h-6 text-arcade-mint" />
+                      <span className="font-arcade text-[10px] sm:text-xs text-white">PHONE GAMEPAD</span>
                     </div>
-                  </div>
-
-                  <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
-                    6 Dynamic Multiplayer Game Arenas
-                  </h2>
-                </motion.div>
-              )}
-
-              {/* SCENE 3: Shadow Vault & Quantum Arena Climax */}
-              {phase >= 3 && (
-                <motion.div
-                  key="scene3"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6 }}
-                  className="space-y-6"
-                >
-                  <h2 className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-arcade-mint via-white to-arcade-cyan tracking-tight">
-                    Ready for Party Launch.
-                  </h2>
-                  <p className="font-mono text-xs sm:text-sm text-white/70 max-w-md mx-auto">
-                    Entering the Arcade Arena now...
-                  </p>
-                </motion.div>
-              )}
+                  </motion.div>
+                )}
+              </motion.div>
             </AnimatePresence>
           </main>
 
-          {/* Footer Bar */}
-          <footer className="relative z-10 flex items-center justify-between border-t border-white/10 pt-4 text-xs font-mono text-white/40">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-arcade-mint" />
-              <span>WebRTC P2P &bull; 60 FPS Canvas</span>
+          {/* Footer Bar with Active Step Indicator */}
+          <footer className="relative z-10 flex items-center justify-between border-t border-white/10 pt-3 text-[10px] sm:text-xs font-mono text-white/40">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-arcade-mint" />
+              <span>WebRTC Direct P2P</span>
             </div>
 
             <div className="flex items-center gap-1.5">
-              {[1, 2, 3].map((step) => (
+              {CINEMATIC_SLIDES.map((_, i) => (
                 <span
-                  key={step}
+                  key={i}
                   className={`h-1.5 rounded-full transition-all duration-500 ${
-                    phase === step ? 'w-6 bg-arcade-amber' : 'w-1.5 bg-white/20'
+                    activeSlide === i ? 'w-6 bg-arcade-amber' : 'w-1.5 bg-white/20'
                   }`}
                 />
               ))}
