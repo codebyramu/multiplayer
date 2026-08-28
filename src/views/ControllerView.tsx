@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GameId, ControllerInput, RoomState, PlayerClientHUDState } from '../types';
-import { GAMES_DATA } from '../data/games';
-import { GlassPanel } from '../components/ui/GlassPanel';
-import { ArcadeButton } from '../components/ui/ArcadeButton';
-import { AvatarSelector } from '../components/ui/AvatarSelector';
-import { Gamepad2, Zap, Shield, Flame, Check, AlertTriangle, Trophy, Crown, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Gamepad2,
+  Tv,
+  Camera,
+  Check,
+  Sparkles,
+  Shuffle,
+  ChevronLeft,
+  ChevronRight,
+  Flame,
+  Volume2,
+  AlertTriangle,
+  RotateCcw,
+  Zap,
+} from 'lucide-react';
+import { RoomState, ControllerInput, GameId, PlayerClientHUDState } from '../types';
+import { GAMES_DATA, PLAYER_AVATARS } from '../data/games';
 import { soundManager } from '../audio/SoundManager';
 import { socketClient } from '../multiplayer/SocketClient';
 import { QRScannerModal } from '../components/ui/QRScannerModal';
@@ -13,159 +24,275 @@ import { CuteCharacter } from '../components/ui/CuteCharacter';
 
 interface ControllerViewProps {
   initialCode?: string;
-  room?: RoomState | null;
-  playerId?: string | null;
-  inGame: boolean;
-  gameId?: GameId;
-  hudState?: PlayerClientHUDState | null;
+  room: RoomState | null;
+  playerId: string | null;
+  inGame?: boolean;
+  gameId: GameId;
+  hudState: PlayerClientHUDState | null;
   allHudStates?: Record<string, PlayerClientHUDState>;
-  onJoin: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
+  onJoin?: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
+  onJoinParty?: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
   onSendInput: (input: ControllerInput) => void;
-  onLeave: () => void;
+  onLeave?: () => void;
+  onLeaveRoom?: () => void;
+  onReplayIntro?: () => void;
 }
 
-const triggerHaptic = (ms = 30) => {
-  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-    try { navigator.vibrate(ms); } catch {}
+const COLOR_PALETTE = ['#00F5A0', '#00E5FF', '#FFB224', '#FF3366', '#9D4EDD', '#FF7700', '#3A86FF', '#E63946'];
+
+export const ControllerView: React.FC<ControllerViewProps> = ({
+  initialCode,
+  room,
+  playerId,
+  gameId,
+  hudState,
+  allHudStates,
+  onJoin,
+  onJoinParty,
+  onSendInput,
+  onLeave,
+  onLeaveRoom,
+}) => {
+  const joinHandler = onJoin || onJoinParty || (async () => ({ success: false }));
+  const leaveHandler = onLeave || onLeaveRoom || (() => {});
+
+  // If in a room, render waiting screen or arcade controller
+  if (room) {
+    const safePlayerId = playerId || Object.keys(room.players)[0] || '';
+    if (room.state === 'lobby') {
+      return (
+        <LobbyScreen
+          room={room}
+          playerId={safePlayerId}
+          color={room.players[safePlayerId]?.color || '#00F5A0'}
+          onLeave={leaveHandler}
+          onSendInput={onSendInput}
+        />
+      );
+    }
+    return (
+      <ArcadeController
+        room={room}
+        playerId={safePlayerId}
+        gameId={gameId}
+        hudState={hudState}
+        allHudStates={allHudStates}
+        onSendInput={onSendInput}
+        onLeave={leaveHandler}
+      />
+    );
   }
+
+  return <MinimalJoinScreen initialCode={initialCode} onJoinParty={joinHandler} />;
 };
 
-/* ─── JOIN FORM ─── */
-const JoinForm: React.FC<{
-  initialCode: string;
-  onJoin: ControllerViewProps['onJoin'];
-}> = ({ initialCode, onJoin }) => {
-  const [code, setCode] = useState(initialCode);
+/* ═══════════════════════════════════════════════════════════════
+   1. ULTRA-MINIMAL APPLE-GRADE JOIN SCREEN (ZERO ESSAY, 3 ROWS)
+   ═══════════════════════════════════════════════════════════════ */
+const MinimalJoinScreen: React.FC<{
+  initialCode?: string;
+  onJoinParty: (data: { code: string; name: string; avatar: string; color: string; skin: string }) => Promise<{ success: boolean; error?: string }>;
+}> = ({ initialCode, onJoinParty }) => {
+  const [code, setCode] = useState(initialCode || '');
   const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState('ship');
-  const [color, setColor] = useState('#00F5A0');
-  const [skin, setSkin] = useState('synth');
+  const [avatarIndex, setAvatarIndex] = useState(0);
+  const [colorIndex, setColorIndex] = useState(0);
   const [isJoining, setIsJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
 
+  // Auto-fill party code from URL query ?join=CODE
   useEffect(() => {
     try {
-      const n = localStorage.getItem('hypercade_pilot_name'); if (n) setName(n);
-      const a = localStorage.getItem('hypercade_avatar'); if (a) setAvatar(a);
-      const c = localStorage.getItem('hypercade_color'); if (c) setColor(c);
+      const urlParams = new URLSearchParams(window.location.search);
+      const joinParam = urlParams.get('join');
+      if (joinParam) {
+        setCode(joinParam.toUpperCase().slice(0, 7));
+      }
     } catch {}
   }, []);
 
-  useEffect(() => { if (initialCode) setCode(initialCode.toUpperCase()); }, [initialCode]);
+  const currentAvatar = PLAYER_AVATARS[avatarIndex % PLAYER_AVATARS.length];
+  const currentColor = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
+
+  const handleRandomize = () => {
+    soundManager.playClick(1050);
+    setAvatarIndex(Math.floor(Math.random() * PLAYER_AVATARS.length));
+    setColorIndex(Math.floor(Math.random() * COLOR_PALETTE.length));
+  };
+
+  const handleCycleColor = () => {
+    soundManager.playClick(950);
+    setColorIndex((prev) => (prev + 1) % COLOR_PALETTE.length);
+  };
+
+  const handleCycleAvatar = () => {
+    soundManager.playClick(850);
+    setAvatarIndex((prev) => (prev + 1) % PLAYER_AVATARS.length);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!code.trim()) { setJoinError('Enter a valid Party Code shown on the TV'); return; }
-    const finalName = name.trim() || `Pilot_${100 + Math.floor(Math.random() * 899)}`;
-    setIsJoining(true); setJoinError(null);
-    try {
-      localStorage.setItem('hypercade_pilot_name', finalName);
-      localStorage.setItem('hypercade_avatar', avatar);
-      localStorage.setItem('hypercade_color', color);
-    } catch {}
-    const res = await onJoin({ code: code.trim().toUpperCase(), name: finalName, avatar, color, skin });
-    setIsJoining(false);
-    if (!res.success) setJoinError(res.error || 'Failed to join. Check the code and try again.');
-  };
-
-  const [showScanner, setShowScanner] = useState(false);
-
-  const handleScanSuccess = async (scannedCode: string) => {
-    setCode(scannedCode);
-    setShowScanner(false);
-    const finalName = name.trim() || `Pilot_${100 + Math.floor(Math.random() * 899)}`;
+    if (!code.trim()) {
+      setError('Please enter party code on TV');
+      return;
+    }
+    setError(null);
     setIsJoining(true);
-    setJoinError(null);
-    try {
-      localStorage.setItem('hypercade_pilot_name', finalName);
-      localStorage.setItem('hypercade_avatar', avatar);
-      localStorage.setItem('hypercade_color', color);
-    } catch {}
-    const res = await onJoin({ code: scannedCode, name: finalName, avatar, color, skin });
+    soundManager.playClick(900);
+
+    const res = await onJoinParty({
+      code: code.trim().toUpperCase(),
+      name: name.trim() || currentAvatar.name.split(' ')[0],
+      avatar: currentAvatar.id,
+      color: currentColor,
+      skin: 'synth',
+    });
+
     setIsJoining(false);
-    if (!res.success) setJoinError(res.error || 'Failed to join with scanned code.');
+    if (!res.success) setError(res.error || 'Could not connect to host.');
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] p-4 flex items-start sm:items-center justify-center overflow-y-auto">
-      <GlassPanel className="w-full max-w-md p-5 sm:p-8 space-y-5 border-arcade-cyan/30 shadow-glow-cyan my-auto">
+    <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="w-full max-w-sm rounded-3xl bg-black/60 border border-white/15 backdrop-blur-2xl p-6 sm:p-7 shadow-[0_0_60px_rgba(0,245,160,0.15)] space-y-5"
+      >
+        {/* Header Branding */}
         <div className="text-center space-y-1">
-          <div className="w-12 h-12 rounded-2xl bg-arcade-cyan/15 border border-arcade-cyan/40 text-arcade-cyan flex items-center justify-center mx-auto mb-3 shadow-glow-cyan">
-            <Gamepad2 className="w-6 h-6" />
+          <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-white/5 border border-white/10 text-xl shadow-lg mx-auto">
+            👑
           </div>
-          <h2 className="font-arcade text-xl sm:text-2xl text-arcade-cream">JOIN ARCADE PARTY</h2>
-          <p className="text-xs font-mono text-arcade-cream-muted">Connect your phone as an instant game controller</p>
+          <h2 className="font-arcade text-xl sm:text-2xl font-black tracking-wider text-white">
+            JOIN PARTY
+          </h2>
+          <p className="font-mono text-[11px] text-white/50 uppercase tracking-widest">
+            INSTANT PHONE GAMEPAD
+          </p>
         </div>
 
-        {/* Scan TV QR Code Button */}
-        <button
-          type="button"
-          onClick={() => {
-            soundManager.playClick(900);
-            setShowScanner(true);
-          }}
-          className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-arcade-cyan/25 via-arcade-cyan/40 to-arcade-cyan/25 border-2 border-arcade-cyan text-arcade-cyan font-arcade text-xs sm:text-sm font-black flex items-center justify-center gap-2 hover:brightness-110 shadow-glow-cyan active:scale-98 transition-all"
-        >
-          <span>📷 SCAN QR CODE TO JOIN</span>
-        </button>
-
-        {joinError && (
-          <div className="p-3 rounded-xl bg-arcade-crimson/15 border border-arcade-crimson/40 text-arcade-crimson text-xs font-mono flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            <span>{joinError}</span>
-          </div>
+        {/* Error Notification */}
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 rounded-xl bg-red-500/15 border border-red-500/40 text-red-400 text-xs font-mono flex items-center gap-2"
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="truncate">{error}</span>
+          </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-mono text-arcade-cream-muted uppercase">Party Code (on TV)</label>
-              <button
-                type="button"
-                onClick={() => setShowScanner(true)}
-                className="text-[10px] font-mono text-arcade-cyan hover:underline flex items-center gap-1"
-              >
-                <span>SCAN QR</span>
-              </button>
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          {/* 1. Party Code Input with Built-In Camera Scanner Icon */}
+          <div className="relative">
             <input
-              type="text" value={code}
+              type="text"
+              value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="e.g. HYP42" maxLength={7}
-              className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/20 text-center font-arcade text-2xl tracking-widest text-arcade-amber uppercase focus:outline-none focus:border-arcade-amber shadow-inner"
+              placeholder="PARTY CODE (ON TV)"
+              maxLength={7}
               required
+              className="w-full pl-4 pr-12 py-3.5 rounded-2xl bg-white/5 border border-white/15 text-center font-arcade text-xl tracking-widest text-arcade-amber placeholder:text-white/30 placeholder:font-mono placeholder:text-xs placeholder:tracking-normal uppercase focus:outline-none focus:border-arcade-amber shadow-inner"
             />
+            <button
+              type="button"
+              onClick={() => {
+                soundManager.playClick(900);
+                setShowScanner(true);
+              }}
+              title="Scan QR Code on TV"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-white/10 hover:bg-white/20 text-arcade-cyan border border-white/10 active:scale-95 transition-all"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
           </div>
+
+          {/* 2. Pilot Name Input */}
           <div>
-            <label className="block text-xs font-mono text-arcade-cream-muted uppercase mb-1.5">Pilot Handle</label>
             <input
-              type="text" value={name}
+              type="text"
+              value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. ShadowViper" maxLength={14}
-              className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/20 text-sm font-display text-arcade-cream focus:outline-none focus:border-arcade-mint"
+              placeholder="PILOT NAME"
+              maxLength={14}
+              className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/15 text-center font-display text-sm tracking-wide text-white placeholder:text-white/30 focus:outline-none focus:border-arcade-mint"
             />
           </div>
-          <AvatarSelector
-            selectedAvatar={avatar} selectedColor={color} selectedSkin={skin}
-            onSelectAvatar={setAvatar} onSelectColor={setColor} onSelectSkin={setSkin}
-          />
-          <ArcadeButton type="submit" variant="cyan" size="lg" fullWidth disabled={isJoining}>
-            {isJoining ? 'SYNCHRONIZING...' : 'CONNECT CONTROLLER'}
-          </ArcadeButton>
+
+          {/* 3. Compact 1-Tap Avatar & Color Cycler Pill */}
+          <div className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white/5 border border-white/10">
+            {/* Tap Avatar to Cycle Character */}
+            <button
+              type="button"
+              onClick={handleCycleAvatar}
+              className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex-1 min-w-0"
+              title="Tap to change avatar"
+            >
+              <CuteCharacter
+                avatar={currentAvatar.id}
+                color={currentColor}
+                size={34}
+                mood="happy"
+              />
+              <span className="font-mono text-xs text-white font-bold truncate">
+                {currentAvatar.name.split(' ')[0]}
+              </span>
+            </button>
+
+            {/* Tap Color Aura to Cycle Color Palette */}
+            <button
+              type="button"
+              onClick={handleCycleColor}
+              style={{ backgroundColor: currentColor }}
+              className="w-7 h-7 rounded-full ring-2 ring-white/40 shadow-lg shrink-0 hover:scale-110 active:scale-90 transition-transform"
+              title="Tap to cycle color"
+            />
+
+            {/* Randomize Dice */}
+            <button
+              type="button"
+              onClick={handleRandomize}
+              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 shrink-0 active:scale-90 transition-all"
+              title="Randomize avatar & color"
+            >
+              <Shuffle className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* 4. Action Button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            type="submit"
+            disabled={isJoining}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-arcade-cyan via-teal-400 to-arcade-mint text-black font-arcade text-xs sm:text-sm font-black tracking-widest shadow-[0_0_30px_rgba(0,229,255,0.5)] border border-white/40 hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {isJoining ? 'CONNECTING...' : 'JOIN PARTY ▶'}
+          </motion.button>
         </form>
 
-        {/* In-App QR Scanner Modal */}
+        {/* In-App Camera QR Scanner Modal */}
         <QRScannerModal
           isOpen={showScanner}
           onClose={() => setShowScanner(false)}
-          onScanSuccess={handleScanSuccess}
+          onScanSuccess={(scannedCode) => {
+            soundManager.playClick(1000);
+            setCode(scannedCode.toUpperCase());
+            setShowScanner(false);
+          }}
         />
-      </GlassPanel>
+      </motion.div>
     </div>
   );
 };
 
-/* ─── LOBBY WAITING SCREEN ─── */
+/* ═══════════════════════════════════════════════════════════════
+   2. MINIMAL WAITING ROOM SCREEN
+   ═══════════════════════════════════════════════════════════════ */
 const LobbyScreen: React.FC<{
   room: RoomState;
   playerId: string;
@@ -178,298 +305,118 @@ const LobbyScreen: React.FC<{
   const [isReady, setIsReady] = useState(player?.isReady ?? false);
 
   useEffect(() => {
-    if (player && typeof player.isReady === 'boolean') {
-      setIsReady(player.isReady);
-    }
+    if (player) setIsReady(player.isReady);
   }, [player?.isReady]);
 
   const toggleReady = () => {
     const next = !isReady;
     setIsReady(next);
-    triggerHaptic(50);
     soundManager.playClick(next ? 1100 : 800);
     socketClient.setReady(next);
     onSendInput({ x: 0, y: 0, angle: 0, magnitude: 0, action1: false, action2: false, timestamp: Date.now() });
   };
 
-  const allGameKeys: GameId[] = ['serpent-arena', 'neon-relay', 'void-tag', 'relic-rush', 'last-platform', 'shadow-outrun'];
   const gameMeta = GAMES_DATA[room.selectedGame] || GAMES_DATA['serpent-arena'];
   const playerName = player?.name || 'PILOT';
 
-  const selectGame = (gId: GameId) => {
-    soundManager.playClick(1000);
-    socketClient.selectGame(gId);
-  };
-
   return (
-    <div className="min-h-[calc(100vh-4rem)] p-4 flex flex-col items-center justify-between max-w-md mx-auto space-y-4 overflow-y-auto">
-      {/* Player Header Badge */}
-      <GlassPanel className="w-full p-4 flex items-center justify-between border-arcade-mint/30 shadow-glow-mint">
-        <div className="flex items-center gap-3">
-          <div
-            className="p-1 rounded-2xl flex items-center justify-center shadow-lg relative border-2"
-            style={{ backgroundColor: `${color}25`, borderColor: color }}
-          >
-            <CuteCharacter
-              avatar={player?.avatar || 'cat'}
-              color={color}
-              mood={isReady ? 'ready' : 'idle'}
-              size={44}
-              showCrown={isOwner}
-            />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-arcade text-sm text-arcade-cream">{playerName}</span>
-              {isOwner && (
-                <span className="px-1.5 py-0.2 rounded bg-arcade-amber/20 text-arcade-amber font-mono text-[9px] font-bold border border-arcade-amber/40">
-                  PARTY LEADER
-                </span>
-              )}
+    <div className="min-h-[calc(100vh-4.5rem)] flex items-center justify-center p-4 select-none">
+      <div className="w-full max-w-sm rounded-3xl bg-black/60 border border-white/15 backdrop-blur-2xl p-6 space-y-5 shadow-2xl">
+        {/* Contender Header */}
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <div
+              className="p-1 rounded-2xl border-2 shadow-lg"
+              style={{ borderColor: color, backgroundColor: `${color}20` }}
+            >
+              <CuteCharacter
+                avatar={player?.avatar || 'cat'}
+                color={color}
+                mood={isReady ? 'ready' : 'idle'}
+                size={40}
+                showCrown={isOwner}
+              />
             </div>
-            <span className="font-mono text-xs text-arcade-cream-muted">ROOM: <strong className="text-arcade-amber">{room.code}</strong></span>
+            <div>
+              <h3 className="font-arcade text-sm text-white">{playerName}</h3>
+              <p className="font-mono text-[11px] text-white/50">
+                ROOM: <strong className="text-arcade-amber">{room.code}</strong>
+              </p>
+            </div>
           </div>
+
+          <button
+            onClick={toggleReady}
+            className={`px-4 py-2 rounded-xl font-arcade text-xs font-black transition-all ${
+              isReady
+                ? 'bg-arcade-mint text-black shadow-glow-mint'
+                : 'bg-white/10 text-white/70 border border-white/15'
+            }`}
+          >
+            {isReady ? 'READY ✓' : 'WAIT'}
+          </button>
         </div>
+
+        {/* Selected Game Banner */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
+          <div className="flex items-center justify-between text-[10px] font-mono text-white/50 uppercase">
+            <span>SELECTED GAME</span>
+            <span className="text-arcade-amber font-bold">{room.selectedGame.replace('-', ' ')}</span>
+          </div>
+          <h4 className="font-arcade text-base text-white">{gameMeta.title}</h4>
+          <p className="font-mono text-[11px] text-white/70 leading-relaxed">
+            {gameMeta.tagline}
+          </p>
+        </div>
+
+        {/* Ready Action Hint */}
+        <p className="text-center font-mono text-[11px] text-white/50">
+          Raise your status on phone. Match begins when all pilots are ready on TV.
+        </p>
 
         <button
-          onClick={toggleReady}
-          className={`px-3.5 py-2 rounded-xl border font-arcade text-xs font-bold transition-all flex items-center gap-1.5 ${
-            isReady
-              ? 'bg-green-500/20 border-green-400 text-green-400 shadow-glow-mint'
-              : 'bg-white/5 border-white/20 text-arcade-cream-muted'
-          }`}
+          onClick={onLeave}
+          className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 font-mono text-xs transition-colors"
         >
-          {isReady ? <Check className="w-4 h-4" /> : '⏳'}
-          {isReady ? 'READY' : 'WAIT'}
+          LEAVE PARTY
         </button>
-      </GlassPanel>
-
-      {/* Selected Arena Card */}
-      <div className="w-full space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-mono text-arcade-cream-muted uppercase tracking-wider">
-            {isOwner ? '🎮 SELECT ARENA (YOU ARE LEADER)' : '📺 SELECTED ARENA ON TV'}
-          </span>
-        </div>
-
-        <div className="relative h-40 w-full rounded-2xl overflow-hidden border-2 border-arcade-amber/50 shadow-glow-amber">
-          {gameMeta.coverImage ? (
-            <img src={gameMeta.coverImage} alt={gameMeta.title} className="absolute inset-0 w-full h-full object-cover" />
-          ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-arcade-amber/20 to-black" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
-          <div className="absolute top-2 left-3">
-            <span className="px-2 py-0.5 rounded-full bg-black/60 text-[10px] font-mono text-arcade-amber uppercase font-bold backdrop-blur-sm border border-white/10">
-              {gameMeta.category}
-            </span>
-          </div>
-          <div className="absolute bottom-3 left-3 right-3">
-            <h3 className="font-arcade text-lg text-arcade-cream">{gameMeta.title}</h3>
-            <p className="text-xs text-arcade-cream-muted line-clamp-1">{gameMeta.tagline}</p>
-          </div>
-        </div>
-
-        {/* Quick Arena Selector Pills for Party Leader */}
-        {isOwner && (
-          <div className="grid grid-cols-6 gap-1 pt-1">
-            {allGameKeys.map((gId) => {
-              const isSelected = room.selectedGame === gId;
-              const g = GAMES_DATA[gId];
-              return (
-                <button
-                  key={gId}
-                  onClick={() => selectGame(gId)}
-                  className={`p-1.5 rounded-xl border text-center transition-all ${
-                    isSelected
-                      ? 'bg-arcade-amber text-black border-arcade-amber font-bold shadow-glow-amber scale-105'
-                      : 'bg-white/5 border-white/10 text-arcade-cream hover:bg-white/10'
-                  }`}
-                >
-                  <span className="text-[8px] font-arcade block truncate">
-                    {g.title.split(' ')[0]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
-
-      {/* Map Voting on Mobile Controller for Shadow Outrun */}
-      {room.selectedGame === 'shadow-outrun' && (
-        <GlassPanel className="w-full p-3.5 space-y-2.5 border-arcade-amber/40 bg-black/70 shadow-glow-amber">
-          <div className="flex items-center justify-between">
-            <span className="font-arcade text-xs text-arcade-amber flex items-center gap-1.5">
-              <span>🗳️ VOTE ARENA MAP</span>
-            </span>
-            <span className="text-[10px] font-mono text-white/60 uppercase">
-              Leading: <strong className="text-arcade-cream">{
-                (room.selectedMap || room.config?.selectedMap) === 'dungeon' ? 'Dungeon' : (room.selectedMap || room.config?.selectedMap) === 'cyber-vault' ? 'Cyber Vault' : 'Backrooms'
-              }</strong>
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { id: 'backrooms' as const, name: 'Backrooms', icon: '🟡', badge: 'LEVEL 0' },
-              { id: 'dungeon' as const, name: 'Dungeon', icon: '🏰', badge: 'GOTHIC' },
-              { id: 'cyber-vault' as const, name: 'Cyber Vault', icon: '💠', badge: 'VAULT' },
-            ].map((m) => {
-              const voteCount = room.mapVoting?.[m.id] || 0;
-              const isPlayerVoted = room.playerMapVotes?.[playerId] === m.id;
-              const isLeading = (room.selectedMap || room.config?.selectedMap || 'backrooms') === m.id;
-
-              return (
-                <motion.button
-                  key={m.id}
-                  whileTap={{ scale: 0.93 }}
-                  onClick={() => {
-                    triggerHaptic(40);
-                    soundManager.playClick(1050);
-                    socketClient.voteMap(m.id, playerId);
-                  }}
-                  className={`p-2.5 rounded-xl border flex flex-col items-center justify-between text-center transition-all min-h-[90px] ${
-                    isPlayerVoted
-                      ? 'bg-gradient-to-b from-arcade-amber to-amber-600 text-black border-white shadow-glow-amber font-black ring-2 ring-white/50'
-                      : isLeading
-                      ? 'bg-arcade-amber/20 border-arcade-amber text-arcade-cream'
-                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                  }`}
-                >
-                  <span className="text-2xl">{m.icon}</span>
-                  <span className="font-arcade text-[10px] font-bold mt-1 block truncate w-full">
-                    {m.name}
-                  </span>
-                  <div className={`mt-1 px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${
-                    isPlayerVoted
-                      ? 'bg-black text-arcade-amber font-black'
-                      : voteCount > 0
-                      ? 'bg-arcade-mint/20 text-arcade-mint border border-arcade-mint/30'
-                      : 'bg-white/10 text-white/50'
-                  }`}>
-                    {voteCount} {voteCount === 1 ? 'VOTE' : 'VOTES'}
-                  </div>
-                </motion.button>
-              );
-            })}
-          </div>
-        </GlassPanel>
-      )}
-
-      {/* Giant Main Ready Button */}
-      <motion.button
-        whileTap={{ scale: 0.94 }}
-        onClick={toggleReady}
-        className={`w-full py-5 rounded-2xl border-2 font-arcade text-lg font-black flex items-center justify-center gap-3 shadow-xl transition-all ${
-          isReady
-            ? 'bg-gradient-to-r from-green-500 to-emerald-600 border-green-400 text-black shadow-[0_0_30px_rgba(34,197,94,0.7)]'
-            : 'bg-arcade-amber/20 hover:bg-arcade-amber/30 border-arcade-amber text-arcade-amber shadow-glow-amber'
-        }`}
-      >
-        {isReady ? (
-          <>
-            <Check className="w-6 h-6 stroke-[3]" />
-            <span>YOU ARE READY!</span>
-          </>
-        ) : (
-          <>
-            <Flame className="w-6 h-6" />
-            <span>TAP TO READY UP</span>
-          </>
-        )}
-      </motion.button>
-
-      <div className="text-center font-mono text-[11px] text-arcade-cream-muted animate-pulse">
-        {isReady ? '⚡ WAITING FOR ALL CONTENDERS &bull; MATCH AUTO-STARTS' : 'TAP THE BUTTON ABOVE TO SIGNAL READY'}
-      </div>
-
-      <button onClick={onLeave} className="text-xs font-mono text-arcade-crimson hover:underline py-2">
-        Disconnect from Party
-      </button>
     </div>
   );
 };
 
-/* ─── FULL MOBILE ARCADE CONTROLLER ─── */
+/* ═══════════════════════════════════════════════════════════════
+   3. ARCADE IN-GAME CONTROLLER (LANDSCAPE SPLIT VIEW)
+   ═══════════════════════════════════════════════════════════════ */
 const ArcadeController: React.FC<{
+  room: RoomState;
+  playerId: string;
   gameId: GameId;
-  room?: RoomState | null;
-  playerId?: string | null;
-  hudState?: PlayerClientHUDState | null;
+  hudState: PlayerClientHUDState | null;
   allHudStates?: Record<string, PlayerClientHUDState>;
-  playerColor: string;
-  playerName: string;
   onSendInput: (input: ControllerInput) => void;
-}> = ({ gameId, room, playerId, hudState, allHudStates, playerColor, playerName, onSendInput }) => {
+  onLeave: () => void;
+}> = ({ room, playerId, gameId, hudState, onSendInput }) => {
   const joystickRef = useRef<HTMLDivElement>(null);
-  const pointerIdRef = useRef<number | null>(null);
   const [stickActive, setStickActive] = useState(false);
   const [stickPos, setStickPos] = useState({ x: 0, y: 0 });
   const stickPosRef = useRef({ x: 0, y: 0 });
-  const [action1Pressed, setAction1Pressed] = useState(false);
-  const [action2Pressed, setAction2Pressed] = useState(false);
   const action1Ref = useRef(false);
   const action2Ref = useRef(false);
-
-  const isEliminated = hudState?.status === 'eliminated';
-  const isWinner = hudState?.status === 'winner';
-
-  const [spectateMode, setSpectateMode] = useState<'arena' | 'pilot'>('arena');
-  const [spectateIndex, setSpectateIndex] = useState(0);
-
-  const contenders = Object.values(room?.players || {}).filter((p) => p.id !== playerId);
-  const currentSpectated = contenders.length > 0 ? contenders[spectateIndex % contenders.length] : null;
-
-  const handleNextSpectate = () => {
-    soundManager.playClick(900);
-    triggerHaptic(20);
-    setSpectateIndex((prev) => (prev + 1) % Math.max(1, contenders.length));
-  };
-
-  const handlePrevSpectate = () => {
-    soundManager.playClick(800);
-    triggerHaptic(20);
-    setSpectateIndex((prev) => (prev - 1 + contenders.length) % Math.max(1, contenders.length));
-  };
-
-  const sendEmote = (emoji: string) => {
-    triggerHaptic(30);
-    soundManager.playClick(1200);
-    socketClient.sendEmote(emoji, playerName, playerColor);
-  };
-
-  const lastSentInputRef = useRef<{ x: number; y: number; a1: boolean; a2: boolean; time: number }>({ x: 0, y: 0, a1: false, a2: false, time: 0 });
+  const [action1Pressed, setAction1Pressed] = useState(false);
+  const [action2Pressed, setAction2Pressed] = useState(false);
+  const pointerIdRef = useRef<number | null>(null);
 
   const emitInput = useCallback((normX = 0, normY = 0, a1?: boolean, a2?: boolean) => {
     const act1 = a1 ?? action1Ref.current;
     const act2 = a2 ?? action2Ref.current;
     const now = Date.now();
-    const last = lastSentInputRef.current;
-
-    // Delta-compression: If inputs are unchanged and joystick is idle, don't spam network
-    const isStationary = Math.abs(normX) < 0.02 && Math.abs(normY) < 0.02;
-    const isSameButtonState = act1 === last.a1 && act2 === last.a2;
-    const isSameVector = Math.hypot(normX - last.x, normY - last.y) < 0.015;
-
-    if (isStationary && last.x === 0 && last.y === 0 && isSameButtonState && now - last.time < 300) {
-      return;
-    }
-
-    if (isSameVector && isSameButtonState && now - last.time < 20) {
-      return;
-    }
-
-    const finalX = isStationary ? 0 : normX;
-    const finalY = isStationary ? 0 : normY;
-    const mag = Math.min(1, Math.sqrt(finalX * finalX + finalY * finalY));
-    const angle = Math.atan2(finalY, finalX);
-
-    lastSentInputRef.current = { x: finalX, y: finalY, a1: act1, a2: act2, time: now };
+    const mag = Math.min(1, Math.hypot(normX, normY));
+    const angle = Math.atan2(normY, normX);
 
     onSendInput({
-      x: finalX,
-      y: finalY,
+      x: normX,
+      y: normY,
       angle,
       magnitude: mag,
       action1: act1,
@@ -485,23 +432,21 @@ const ArcadeController: React.FC<{
     const cy = rect.top + rect.height / 2;
     const dx = clientX - cx;
     const dy = clientY - cy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const dist = Math.hypot(dx, dy);
     const maxRadius = rect.width / 2;
     const clampedDist = Math.min(dist, maxRadius);
     const angle = Math.atan2(dy, dx);
     const normX = (clampedDist / maxRadius) * Math.cos(angle);
     const normY = (clampedDist / maxRadius) * Math.sin(angle);
-    const px = normX * (rect.width / 2 - 20);
-    const py = normY * (rect.height / 2 - 20);
+    const px = normX * (rect.width / 2 - 24);
+    const py = normY * (rect.height / 2 - 24);
     stickPosRef.current = { x: px, y: py };
     setStickPos({ x: px, y: py });
     emitInput(normX, normY);
   }, [emitInput]);
 
-  // Pointer Event Handlers for 100% Reliable Touch/Mouse Tracking
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation();
     pointerIdRef.current = e.pointerId;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     setStickActive(true);
@@ -523,572 +468,116 @@ const ArcadeController: React.FC<{
     emitInput(0, 0);
   };
 
-  // Fallback Touch Handlers for Older WebViews
-  const onTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    if (touch) {
-      setStickActive(true);
-      updateStickFromPoint(touch.clientX, touch.clientY);
-    }
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    e.preventDefault();
-    if (!stickActive) return;
-    const touch = e.changedTouches[0];
-    if (touch) {
-      updateStickFromPoint(touch.clientX, touch.clientY);
-    }
-  };
-
-  const onTouchEnd = (e: React.TouchEvent) => {
-    e.preventDefault();
-    setStickActive(false);
-    stickPosRef.current = { x: 0, y: 0 };
-    setStickPos({ x: 0, y: 0 });
-    emitInput(0, 0);
-  };
-
-  // Action Buttons with unified touch & pointer handling
   const onA1Down = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     action1Ref.current = true;
     setAction1Pressed(true);
-    triggerHaptic(40);
     soundManager.playClick(1000);
-    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 67.5 : 0, stickPosRef.current.y ? stickPosRef.current.y / 67.5 : 0, true, action2Ref.current);
+    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 60 : 0, stickPosRef.current.y ? stickPosRef.current.y / 60 : 0, true, action2Ref.current);
   };
 
   const onA1Up = (e?: React.SyntheticEvent) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (e) e.preventDefault();
     action1Ref.current = false;
     setAction1Pressed(false);
-    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 67.5 : 0, stickPosRef.current.y ? stickPosRef.current.y / 67.5 : 0, false, action2Ref.current);
+    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 60 : 0, stickPosRef.current.y ? stickPosRef.current.y / 60 : 0, false, action2Ref.current);
   };
 
-  const a2Cooldown = hudState?.action2Cooldown ?? 0;
-  const a2OnCooldown = a2Cooldown > 0;
-
-  const onA2Down = (e?: React.SyntheticEvent) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (a2OnCooldown) { triggerHaptic(10); return; }
+  const onA2Down = (e: React.SyntheticEvent) => {
+    e.preventDefault();
     action2Ref.current = true;
     setAction2Pressed(true);
-    triggerHaptic(45);
     soundManager.playClick(1200);
-    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 67.5 : 0, stickPosRef.current.y ? stickPosRef.current.y / 67.5 : 0, action1Ref.current, true);
+    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 60 : 0, stickPosRef.current.y ? stickPosRef.current.y / 60 : 0, action1Ref.current, true);
   };
 
   const onA2Up = (e?: React.SyntheticEvent) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (e) e.preventDefault();
     action2Ref.current = false;
     setAction2Pressed(false);
-    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 67.5 : 0, stickPosRef.current.y ? stickPosRef.current.y / 67.5 : 0, action1Ref.current, false);
+    emitInput(stickPosRef.current.x ? stickPosRef.current.x / 60 : 0, stickPosRef.current.y ? stickPosRef.current.y / 60 : 0, action1Ref.current, false);
   };
 
-  const action1Label = gameId === 'serpent-arena' ? '🚀 HYPER BOOST'
-    : gameId === 'neon-relay' ? '⬆️ JUMP / HOP'
-    : gameId === 'void-tag' ? '⚡ PHASE DASH'
-    : gameId === 'relic-rush' ? '💥 TACKLE SLAM'
-    : gameId === 'shadow-outrun' ? '⚡ SPRINT DASH'
-    : '⬆️ JUMP / HOP';
-
-  const hasAction2 = ['void-tag', 'relic-rush', 'last-platform', 'neon-relay'].includes(gameId);
-  const action2Label = gameId === 'last-platform' ? '⚡ FREEZE SHOT'
-    : gameId === 'void-tag' ? '📡 EMP STUN'
-    : gameId === 'neon-relay' ? '🚀 NITRO BOOST'
-    : '🛡️ KINETIC SHIELD';
-
-  // State for initial "ROUND LOST" red screen flash upon death
-  const [showDeathSplash, setShowDeathSplash] = useState(false);
-
-  // Automatically select a random alive contender when player is eliminated
-  useEffect(() => {
-    if (isEliminated) {
-      setShowDeathSplash(true);
-      triggerHaptic(80);
-      const timer = setTimeout(() => {
-        setShowDeathSplash(false);
-      }, 2400);
-
-      if (contenders.length > 0) {
-        // Find alive contenders first
-        const aliveContenders = contenders.filter((p) => {
-          const h = allHudStates?.[p.id];
-          return !h || h.status !== 'eliminated';
-        });
-        const pool = aliveContenders.length > 0 ? aliveContenders : contenders;
-        const randomIndex = Math.floor(Math.random() * pool.length);
-        const chosen = pool[randomIndex];
-        const targetIndex = contenders.findIndex((c) => c.id === chosen.id);
-        setSpectateIndex(targetIndex !== -1 ? targetIndex : 0);
-      }
-
-      return () => clearTimeout(timer);
-    }
-  }, [isEliminated]);
-
-  if (isWinner || isEliminated) {
-    // Exclusively show ROUND LOST screen on player controller upon losing
-    if (isEliminated && !isWinner) {
-      return (
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="fixed inset-0 z-50 bg-gradient-to-b from-[#32000A] via-[#1A0005] to-[#08080D] flex flex-col items-center justify-between p-6 text-center select-none overflow-hidden touch-none"
-        >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,51,102,0.3)_0%,transparent_70%)] animate-pulse pointer-events-none" />
-
-          {/* Top Status Header */}
-          <div className="w-full flex items-center justify-between px-3.5 py-2 rounded-2xl bg-white/5 border border-white/10 shrink-0 backdrop-blur-md">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">💀</span>
-              <span className="font-arcade text-xs text-arcade-crimson font-black tracking-wider">ELIMINATED</span>
-            </div>
-            <span className="font-mono text-xs text-arcade-amber font-bold">{hudState?.score ?? 0} PTS</span>
-          </div>
-
-          {/* Center Elimination Banner */}
-          <div className="my-auto space-y-4 max-w-sm">
-            <motion.div
-              animate={{ scale: [0.9, 1.1, 0.9], rotate: [-4, 4, -4] }}
-              transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-              className="w-28 h-28 mx-auto rounded-3xl bg-arcade-crimson/20 border-2 border-arcade-crimson flex items-center justify-center text-6xl shadow-[0_0_60px_rgba(255,51,102,0.85)]"
-            >
-              💀
-            </motion.div>
-
-            <div className="space-y-1.5">
-              <motion.h1 
-                animate={{ y: [-4, 4, -4] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-                className="font-arcade text-3xl sm:text-5xl font-black text-arcade-crimson tracking-widest drop-shadow-[0_0_30px_rgba(255,51,102,0.9)] uppercase"
-              >
-                ROUND LOST
-              </motion.h1>
-              <p className="font-mono text-sm sm:text-base text-arcade-cream font-bold leading-relaxed">
-                Better luck next time, pilot!
-              </p>
-            </div>
-
-            {/* Emote Cheer to TV Display */}
-            <div className="p-3 rounded-2xl bg-black/60 border border-white/10 backdrop-blur-md space-y-2 mt-4">
-              <span className="text-[10px] font-mono text-white/60 block uppercase font-bold">
-                CHEER &bull; SEND EMOTE TO TV:
-              </span>
-              <div className="flex items-center justify-center gap-2">
-                {['🔥', '⚡', '💀', '👑', '👏', '🎉'].map((emo) => (
-                  <motion.button
-                    key={emo}
-                    whileTap={{ scale: 0.85 }}
-                    onClick={() => sendEmote(emo)}
-                    className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 active:scale-90 text-xl flex items-center justify-center border border-white/15 shadow-md"
-                  >
-                    {emo}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Broadcast Hint */}
-          <div className="font-mono text-[10px] text-white/40 tracking-wider shrink-0 uppercase">
-            📺 MATCH STILL IN PROGRESS &bull; WATCH ACTION ON TV SCREEN
-          </div>
-        </motion.div>
-      );
-    }
-
-    const spectatedHud = currentSpectated ? (allHudStates?.[currentSpectated.id] || null) : null;
-    const spectatedRank = spectatedHud?.rank || (spectateIndex + 1);
-    const spectatedScore = spectatedHud?.score ?? currentSpectated?.score ?? 0;
-    const spectatedStatus = spectatedHud?.status || 'alive';
-    const spectatedStatName = spectatedHud?.customStatName || (gameId === 'serpent-arena' ? 'BOOST' : gameId === 'last-platform' ? 'FREEZE' : gameId === 'void-tag' ? 'ROLE' : 'SCORE');
-    const spectatedStatVal = spectatedHud?.customStatValue || (spectatedStatus === 'hunter' ? '⚡ HUNTER' : 'SURVIVOR');
-
-    return (
-      <div className="fixed inset-0 z-50 bg-[#07070C] flex flex-col justify-between p-2.5 sm:p-3 text-center select-none overflow-hidden touch-none">
-        {/* ─── TOP SPECTATOR BAR with Left/Right arrows at corners ─── */}
-        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-2xl bg-white/5 border border-white/10 shrink-0 backdrop-blur-md shadow-xl gap-2">
-          {/* Top-Left Arrow: PREV CONTENDER */}
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={handlePrevSpectate}
-            disabled={contenders.length <= 1}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-arcade-cyan/30 to-arcade-cyan/15 border border-arcade-cyan/50 text-arcade-cyan hover:brightness-125 font-arcade text-xs font-bold active:scale-95 shadow-glow-cyan shrink-0 disabled:opacity-30"
-          >
-            <ChevronLeft className="w-4 h-4 stroke-[3]" />
-            <span className="hidden xs:inline">PREV</span>
-          </motion.button>
-
-          {/* Center Title Badge */}
-          <div className="flex items-center gap-2 min-w-0 flex-1 justify-center">
-            <span className="text-base">{isWinner ? '👑' : '💀'}</span>
-            <span className="font-arcade text-xs sm:text-sm text-arcade-cream truncate">
-              {isWinner ? 'ARENA CHAMPION' : 'SPECTATING LIVE MATCH'}
-            </span>
-            <span className="px-2 py-0.5 rounded-full bg-arcade-amber/20 border border-arcade-amber/40 font-mono text-[10px] text-arcade-amber font-bold shrink-0">
-              {contenders.length > 0 ? `${(spectateIndex % contenders.length) + 1}/${contenders.length}` : '0 ALIVE'}
-            </span>
-          </div>
-
-          {/* Top-Right Arrow: NEXT CONTENDER */}
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={handleNextSpectate}
-            disabled={contenders.length <= 1}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-arcade-cyan/15 to-arcade-cyan/30 border border-arcade-cyan/50 text-arcade-cyan hover:brightness-125 font-arcade text-xs font-bold active:scale-95 shadow-glow-cyan shrink-0 disabled:opacity-30"
-          >
-            <span className="hidden xs:inline">NEXT</span>
-            <ChevronRight className="w-4 h-4 stroke-[3]" />
-          </motion.button>
-        </div>
-
-        {/* ─── MAIN SPECTATOR STAGE & EXACT POV VIEW ─── */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-2.5 my-auto max-w-lg mx-auto w-full px-2">
-          {isWinner ? (
-            <div className="p-6 rounded-3xl bg-arcade-amber/20 border-2 border-arcade-amber shadow-glow-amber space-y-2 w-full">
-              <div className="text-5xl animate-bounce">👑</div>
-              <h3 className="font-arcade text-2xl text-arcade-amber">CHAMPION OF THE ARENA!</h3>
-              <p className="font-mono text-xs text-arcade-cream">Congratulations! You conquered the match.</p>
-            </div>
-          ) : currentSpectated ? (
-            <div className="w-full rounded-3xl bg-gradient-to-b from-white/10 via-white/5 to-black/60 border-2 border-white/15 p-4 shadow-2xl space-y-3 relative overflow-hidden backdrop-blur-xl">
-              {/* Glowing Ambient Halo behind player */}
-              <div
-                className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-28 rounded-full blur-3xl -z-10 opacity-40"
-                style={{ backgroundColor: currentSpectated.color || '#00F5A0' }}
-              />
-
-              {/* Pilot Card Header with 2D Cute Character */}
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="p-1 rounded-2xl border-2 flex items-center justify-center shadow-lg shrink-0"
-                    style={{
-                      backgroundColor: `${currentSpectated.color || '#00F5A0'}25`,
-                      borderColor: currentSpectated.color || '#00F5A0',
-                    }}
-                  >
-                    <CuteCharacter
-                      avatar={currentSpectated.isBot ? 'robot' : (currentSpectated.avatar || 'cat')}
-                      color={currentSpectated.color || '#00F5A0'}
-                      mood={spectatedStatus === 'winner' ? 'winner' : spectatedStatus === 'eliminated' ? 'eliminated' : 'happy'}
-                      size={52}
-                    />
-                  </div>
-                  <div className="text-left min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-arcade text-sm sm:text-base font-black text-white block truncate">
-                        {currentSpectated.name}
-                      </span>
-                      {currentSpectated.isBot && (
-                        <span className="px-1.5 py-0.2 rounded bg-white/10 text-white/70 font-mono text-[9px] font-bold uppercase">
-                          AI BOT
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono text-xs text-arcade-mint font-bold flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-arcade-mint animate-pulse" />
-                      LIVE POV STREAMING
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <span className="font-arcade text-lg sm:text-xl font-black text-arcade-amber block drop-shadow-[0_0_10px_rgba(255,178,36,0.8)]">
-                    {spectatedScore} PTS
-                  </span>
-                  <span className="font-mono text-xs text-arcade-cyan font-bold block">
-                    RANK #{spectatedRank}
-                  </span>
-                </div>
-              </div>
-
-              {/* ─── LIVE HUD POV METRICS OF SPECTATED PILOT ─── */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
-                  <span className="text-[9px] font-mono text-white/50 block uppercase">PILOT STATUS</span>
-                  <span className={`text-xs font-arcade font-black uppercase ${
-                    spectatedStatus === 'hunter' ? 'text-arcade-crimson animate-pulse' : 'text-arcade-mint'
-                  }`}>
-                    {spectatedStatus === 'hunter' ? '⚡ HUNTER' : spectatedStatus === 'eliminated' ? '💀 DEAD' : '🛡️ SURVIVOR'}
-                  </span>
-                </div>
-                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
-                  <span className="text-[9px] font-mono text-white/50 block uppercase">{spectatedStatName}</span>
-                  <span className="text-xs font-mono font-bold text-arcade-cream truncate block">
-                    {spectatedStatVal}
-                  </span>
-                </div>
-                <div className="p-2 rounded-xl bg-black/40 border border-white/10">
-                  <span className="text-[9px] font-mono text-white/50 block uppercase">GAME MODE</span>
-                  <span className="text-xs font-arcade text-arcade-amber font-bold truncate block">
-                    {(GAMES_DATA[gameId] || GAMES_DATA['serpent-arena']).title.split(' ')[0]}
-                  </span>
-                </div>
-              </div>
-
-              {/* Message from Game Engine */}
-              {spectatedHud?.message && (
-                <div className="py-1 px-2.5 rounded-lg bg-arcade-amber/15 border border-arcade-amber/30 text-arcade-amber font-mono text-[10px] text-center font-bold">
-                  {spectatedHud.message}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-6 rounded-3xl bg-white/5 border border-white/10 space-y-2">
-              <span className="text-4xl">📺</span>
-              <p className="font-mono text-xs text-white/50">Awaiting other contenders...</p>
-            </div>
-          )}
-
-          {/* ─── SEND LIVE REACTION EMOTES TO TV SCREEN ─── */}
-          <div className="w-full p-2.5 rounded-2xl bg-black/50 border border-white/10 backdrop-blur-md">
-            <span className="text-[9px] font-mono text-arcade-cream-muted block mb-1.5 uppercase font-bold tracking-wider">
-              CHEER FOR PILOT &bull; TAP TO SEND LIVE EMOTE TO TV:
-            </span>
-            <div className="flex items-center justify-between gap-1.5">
-              {['🔥', '⚡', '💀', '👑', '👏', '🎉'].map((emo) => (
-                <motion.button
-                  key={emo}
-                  whileTap={{ scale: 0.85 }}
-                  onClick={() => sendEmote(emo)}
-                  className="flex-1 h-10 rounded-xl bg-white/10 hover:bg-white/20 active:scale-90 text-xl flex items-center justify-center border border-white/15 transition-transform shadow-md"
-                >
-                  {emo}
-                </motion.button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom TV Broadcast Notice */}
-        <div className="font-mono text-[9px] text-arcade-mint animate-pulse shrink-0 py-0.5">
-          👀 SWITCH PLAYERS WITH ARROWS AT TOP CORNERS &bull; FULL ARENA ACTION ON TV
-        </div>
-      </div>
-    );
-  }
+  const action1Label = gameId === 'serpent-arena' ? '🚀 BOOST' : gameId === 'neon-relay' ? '⬆️ JUMP' : gameId === 'void-tag' ? '⚡ DASH' : '💥 TACKLE';
+  const hasAction2 = ['void-tag', 'relic-rush', 'last-platform'].includes(gameId);
+  const action2Label = gameId === 'last-platform' ? '⚡ FREEZE' : '📡 EMP';
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-[#0A0A0F] flex flex-col justify-between select-none overflow-hidden touch-none p-2 sm:p-3"
-      style={{ touchAction: 'none' }}
-    >
-      {/* ─── 1. TOP CONTROLLER HUD BAR ─── */}
-      <div
-        className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 border border-white/10 backdrop-blur-md shrink-0 shadow-lg gap-2"
-      >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <div className="w-3.5 h-3.5 rounded-full ring-2 ring-white/30 shrink-0" style={{ backgroundColor: playerColor }} />
-          <span className="font-display font-bold text-xs text-arcade-cream truncate">{playerName}</span>
-        </div>
-
-        {hudState && (
-          <div className="flex items-center gap-2 font-mono text-xs shrink-0">
-            <span className="text-arcade-amber font-bold">{hudState.score} PTS</span>
-            <span className="text-arcade-cyan font-bold">#{hudState.rank}/{hudState.totalPlayers ?? 1}</span>
-          </div>
-        )}
-
-        <span className="font-arcade text-[9px] text-arcade-cream-muted shrink-0 hidden xs:block">
-          {(GAMES_DATA[gameId] || GAMES_DATA['serpent-arena']).title.split(' ')[0]}
+    <div className="fixed inset-0 z-50 bg-[#07080E] flex flex-col justify-between p-3 select-none touch-none overflow-hidden">
+      {/* Top Status Strip */}
+      <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl">
+        <span className="font-arcade text-xs text-white">
+          {hudState?.score !== undefined ? `SCORE: ${hudState.score}` : gameId.toUpperCase()}
+        </span>
+        <span className="font-mono text-xs text-arcade-amber font-bold">
+          ROOM: {room.code}
         </span>
       </div>
 
-      {/* ─── 2. HUNTER / FROZEN / STATUS ALERTS ─── */}
-      {hudState?.status === 'hunter' && (
-        <div className="text-center py-1 rounded-lg bg-arcade-violet/30 border border-arcade-violet font-arcade text-[10px] text-arcade-violet animate-pulse shadow-glow-violet shrink-0">
-          ⚡ YOU ARE THE VOID HUNTER — TAG SURVIVORS!
-        </div>
-      )}
-
-      {/* ─── 3. MAIN CONTROLLER INTERACTION REGION ─── */}
-      {/* Landscape: side-by-side split (joystick left 50%, buttons right 50%) */}
-      <div className="flex-1 flex flex-row items-stretch justify-between gap-2 min-h-0 py-1 overflow-hidden">
-
-        {/* ═══ 360° ANALOG JOYSTICK — Left half ═══ */}
-        <div className="flex flex-col items-center justify-center gap-1 w-1/2 h-full py-1">
+      {/* Controller Split: Left 360 Joystick, Right Action Buttons */}
+      <div className="flex-1 flex items-center justify-between gap-4 max-w-2xl mx-auto w-full px-2">
+        {/* Left: 360 Virtual Analog Joystick */}
+        <div className="w-1/2 flex items-center justify-center">
           <div
             ref={joystickRef}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-            className="relative flex items-center justify-center rounded-full cursor-pointer touch-none shadow-2xl shrink-0"
-            style={{
-              width: 'min(38vw, 24vh, 160px)',
-              height: 'min(38vw, 24vh, 160px)',
-              background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(10,10,15,0.85) 100%)',
-              border: `2px solid ${stickActive ? '#FFB224' : 'rgba(255,255,255,0.18)'}`,
-              boxShadow: stickActive ? '0 0 25px rgba(255,178,36,0.3) inset, 0 0 15px rgba(255,178,36,0.3)' : 'none',
-              transition: 'border-color 0.1s, box-shadow 0.1s',
-            }}
+            className="w-40 h-40 rounded-full bg-white/5 border-2 border-white/20 relative flex items-center justify-center shadow-[0_0_40px_rgba(0,245,160,0.15)] active:border-arcade-mint transition-colors"
           >
-            {/* Center Reference Guide Rings */}
-            <div className="absolute w-[55%] h-[55%] rounded-full border border-dashed border-white/15 pointer-events-none" />
-            <div className="absolute w-[28%] h-[28%] rounded-full border border-white/10 pointer-events-none" />
-
-            {/* Glowing Draggable Stick Knob */}
+            {/* Center Thumb Knob */}
             <motion.div
-              animate={{ x: stickPos.x, y: stickPos.y }}
-              transition={{ type: 'spring', stiffness: 850, damping: 40 }}
-              className="absolute w-11 h-11 rounded-full pointer-events-none flex items-center justify-center font-bold text-[9px] text-black shadow-2xl select-none"
               style={{
-                background: 'radial-gradient(circle at 35% 35%, #FFE27A, #FF7700)',
-                boxShadow: '0 4px 16px rgba(255,140,0,0.9), 0 0 10px rgba(255,178,36,0.8)',
-                border: '2px solid rgba(255,255,255,0.6)',
+                transform: `translate(${stickPos.x}px, ${stickPos.y}px)`,
               }}
+              className={`w-16 h-16 rounded-full border-2 transition-shadow ${
+                stickActive
+                  ? 'bg-arcade-mint text-black border-white shadow-[0_0_25px_rgba(0,245,160,0.8)]'
+                  : 'bg-white/20 border-white/40'
+              } flex items-center justify-center`}
             >
-              STEER
+              <div className="w-4 h-4 rounded-full bg-white/40" />
             </motion.div>
           </div>
-          <span className="text-[8px] font-mono text-arcade-cream-muted uppercase tracking-widest shrink-0">
-            360&deg; Virtual Touch
-          </span>
         </div>
 
-        {/* ═══ TACTICAL ACTION BUTTONS — Right half ═══ */}
-        <div className="flex flex-col items-stretch justify-center gap-2 w-1/2 h-full py-1 pr-1">
-
-          {/* Action 2 Button (Tactical Ability: Freeze Shot / EMP / Shield / Nitro) */}
-          {hasAction2 && (
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              onPointerDown={onA2Down}
-              onPointerUp={onA2Up}
-              onTouchStart={onA2Down}
-              onTouchEnd={onA2Up}
-              disabled={a2OnCooldown}
-              className={`w-full py-3 rounded-2xl border font-arcade text-xs font-black flex items-center justify-center gap-2 transition-all relative overflow-hidden shadow-lg min-h-[48px] ${
-                action2Pressed && !a2OnCooldown
-                  ? 'bg-arcade-cyan text-black border-arcade-cyan shadow-glow-cyan scale-95'
-                  : a2OnCooldown
-                  ? 'bg-black/40 border-white/10 text-white/30 cursor-not-allowed'
-                  : 'bg-arcade-cyan/20 border-arcade-cyan/50 text-arcade-cyan hover:bg-arcade-cyan/30 shadow-glow-cyan'
-              }`}
-            >
-              {/* Cooldown progress bar */}
-              {a2OnCooldown && (
-                <div
-                  className="absolute bottom-0 left-0 h-1 bg-arcade-cyan transition-all"
-                  style={{ width: `${(1 - a2Cooldown) * 100}%` }}
-                />
-              )}
-              <Shield className="w-4 h-4 shrink-0" />
-              <span className="truncate">{action2Label}</span>
-              {a2OnCooldown && <span className="text-[9px] opacity-70 ml-1 font-mono shrink-0">(WAIT)</span>}
-            </motion.button>
-          )}
-
-          {/* Action 1 Button (Primary: Jump / Boost / Tackle / Dash) */}
-          <motion.button
-            whileTap={{ scale: 0.92 }}
+        {/* Right: Action Buttons */}
+        <div className="w-1/2 flex flex-col items-center justify-center gap-3">
+          <button
             onPointerDown={onA1Down}
             onPointerUp={onA1Up}
-            onTouchStart={onA1Down}
-            onTouchEnd={onA1Up}
-            className={`w-full rounded-2xl border-2 font-arcade font-black flex items-center justify-center gap-2 shadow-2xl transition-all min-h-[52px] ${
+            onPointerCancel={onA1Up}
+            className={`w-full py-5 rounded-2xl font-arcade text-sm font-black tracking-wider transition-all border-2 ${
               action1Pressed
-                ? 'bg-arcade-amber text-black border-arcade-amber shadow-[0_0_35px_rgba(255,178,36,1)] scale-95'
-                : 'bg-gradient-to-r from-arcade-amber/25 to-amber-600/30 border-arcade-amber text-arcade-amber hover:bg-arcade-amber/40 shadow-glow-amber'
+                ? 'bg-arcade-mint text-black border-white shadow-[0_0_30px_rgba(0,245,160,0.8)] scale-98'
+                : 'bg-white/10 hover:bg-white/15 text-white border-white/20 shadow-lg'
             }`}
-            style={{
-              fontSize: hasAction2 ? 13 : 15,
-              paddingTop: hasAction2 ? 14 : 22,
-              paddingBottom: hasAction2 ? 14 : 22,
-            }}
           >
-            <Zap className="w-5 h-5 fill-current shrink-0" />
-            <span className="truncate">{action1Label}</span>
-          </motion.button>
+            {action1Label}
+          </button>
 
-          {/* Spectator / Live Emotes Pill Row */}
-          <div className="flex items-center justify-center gap-1.5">
-            {['🔥', '⚡', '👑', '🎉'].map((emo) => (
-              <button
-                key={emo}
-                onClick={() => sendEmote(emo)}
-                className="flex-1 min-w-0 h-9 rounded-lg bg-white/5 hover:bg-white/15 active:scale-90 text-base flex items-center justify-center border border-white/10 transition-transform"
-                title="Send TV reaction"
-              >
-                {emo}
-              </button>
-            ))}
-          </div>
+          {hasAction2 && (
+            <button
+              onPointerDown={onA2Down}
+              onPointerUp={onA2Up}
+              onPointerCancel={onA2Up}
+              className={`w-full py-4 rounded-2xl font-arcade text-xs font-black tracking-wider transition-all border-2 ${
+                action2Pressed
+                  ? 'bg-arcade-amber text-black border-white shadow-[0_0_30px_rgba(255,178,36,0.8)] scale-98'
+                  : 'bg-white/5 hover:bg-white/10 text-white/80 border-white/15 shadow-md'
+              }`}
+            >
+              {action2Label}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ─── 4. BOTTOM TV ORIENTATION HINT ─── */}
-      <div className="text-center font-mono text-[8px] text-arcade-cream-muted uppercase py-0.5 shrink-0">
-        LOOK AT THE TV / MAIN DISPLAY FOR AUTHORITATIVE ARENA ACTION
+      {/* Bottom Hint */}
+      <div className="text-center font-mono text-[10px] text-white/40 uppercase">
+        📺 WATCH ACTION ON TV SCREEN &bull; 60 FPS AUTHORITATIVE SYNC
       </div>
-    </div>
-  );
-};
-
-export const ControllerView: React.FC<ControllerViewProps> = ({
-  initialCode = '',
-  room,
-  playerId,
-  inGame,
-  gameId = 'serpent-arena',
-  hudState,
-  allHudStates,
-  onJoin,
-  onSendInput,
-  onLeave,
-}) => {
-  // Request fullscreen & device orientation lock if available
-  useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && 'screen' in window && 'orientation' in window.screen) {
-        (window.screen.orientation as any)?.lock?.('landscape')?.catch?.(() => {});
-      }
-    } catch {}
-  }, []);
-
-  const player = room && playerId ? room.players[playerId] : null;
-  const playerColor = player?.color || '#00F5A0';
-  const playerName = player?.name || '';
-
-  // 1. Not connected → show join form
-  if (!room || !playerId) {
-    return <JoinForm initialCode={initialCode} onJoin={onJoin} />;
-  }
-
-  // 2. In lobby → show lobby screen
-  if (!inGame) {
-    return (
-      <LobbyScreen
-        room={room}
-        playerId={playerId}
-        color={playerColor}
-        onLeave={onLeave}
-        onSendInput={onSendInput}
-      />
-    );
-  }
-
-  // 3. In game → full-screen fixed landscape arcade controller
-  return (
-    <div className="fixed inset-0 z-50 bg-[#0A0A0F] select-none overflow-hidden touch-none">
-      <ArcadeController
-        gameId={gameId}
-        room={room}
-        playerId={playerId}
-        hudState={hudState}
-        allHudStates={allHudStates}
-        playerColor={playerColor}
-        playerName={playerName}
-        onSendInput={onSendInput}
-      />
     </div>
   );
 };
